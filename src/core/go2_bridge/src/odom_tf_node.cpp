@@ -27,6 +27,9 @@ public:
     z_lift_ = declare_parameter<double>("z_lift", 0.0);
     stamp_mode_ = declare_parameter<std::string>("stamp_mode", "align");
     max_rate_ = declare_parameter<double>("max_rate", 50.0);
+    // Built-in odometry under-reads distance in ClassicWalk (x1.189 +- 0.022 over 5 runs vs FAST-LIO).
+    // Scaling x, y makes the odom frame metric for path following on it. 1.0 = unchanged.
+    xy_scale_ = declare_parameter<double>("xy_scale", 1.0);
     min_dt_ = (max_rate_ > 0.0) ? (1.0 / max_rate_) : 0.0;
   }
 
@@ -101,8 +104,8 @@ private:
     out.header.frame_id = parent_;
     out.child_frame_id = child_;
     const auto & p = msg->pose.pose;
-    out.transform.translation.x = p.position.x;
-    out.transform.translation.y = p.position.y;
+    out.transform.translation.x = xy_scale_ * p.position.x;
+    out.transform.translation.y = xy_scale_ * p.position.y;
     out.transform.translation.z = p.position.z + z_lift_;
     out.transform.rotation = p.orientation;
 
@@ -125,7 +128,7 @@ private:
   }
 
   std::string topic_, parent_, child_, stamp_mode_;
-  double z_lift_{0.0}, max_rate_{50.0}, min_dt_{0.02}, last_pub_{0.0};
+  double z_lift_{0.0}, max_rate_{50.0}, min_dt_{0.02}, last_pub_{0.0}, xy_scale_{1.0};
   size_t count_{0}, skipped_{0};
   ClockAligner clock_{10.0};
   MonotonicStamp mono_;

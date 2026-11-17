@@ -1,0 +1,80 @@
+# Day 1 track race: Nav2 controller_server + Regulated Pure Pursuit following the lane centre path
+# that track_day1/day1_runner_node.py builds from camera edges in the (metric-scaled) built-in odom frame.
+# No map, no AMCL, no FAST-LIO.
+controller_server:
+  ros__parameters:
+    use_sim_time: false
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.5
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.5
+    odom_topic: /utlidar/robot_odom
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["goal_checker"]
+    controller_plugins: ["FollowPath"]
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.2
+      movement_time_allowance: 10.0
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.10
+      yaw_goal_tolerance: 6.28        # the lap end has no heading requirement
+      stateful: true
+    FollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      desired_linear_vel: 0.5         # overridden by the runner's v= (set_parameters)
+      lookahead_dist: 0.8
+      min_lookahead_dist: 0.6
+      max_lookahead_dist: 1.2
+      lookahead_time: 1.5
+      use_velocity_scaled_lookahead_dist: false
+      transform_tolerance: 0.3
+      min_approach_linear_velocity: 0.05
+      approach_velocity_scaling_dist: 0.6
+      use_collision_detection: false
+      max_allowed_time_to_collision_up_to_carrot: 1.0
+      use_regulated_linear_velocity_scaling: true
+      use_cost_regulated_linear_velocity_scaling: false
+      regulated_linear_scaling_min_radius: 0.9
+      # Go2 does not lift its feet below ~0.1-0.15 m/s: never let the regulation go lower
+      regulated_linear_scaling_min_speed: 0.25
+      use_fixed_curvature_lookahead: false
+      use_rotate_to_heading: false    # in-place turns with tiny wz are what made Go2 sway before
+      rotate_to_heading_angular_vel: 0.8
+      allow_reversing: false
+      max_robot_pose_search_dist: 2.0
+      interpolate_curvature_after_goal: false
+      cost_scaling_dist: 0.3
+      cost_scaling_gain: 1.0
+      inflation_cost_scaling_factor: 3.0
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: false
+      update_frequency: 5.0
+      publish_frequency: 1.0
+      global_frame: odom
+      robot_base_frame: base_link
+      rolling_window: true
+      width: 6
+      height: 6
+      resolution: 0.05
+      footprint: "[[0.35, 0.155], [0.35, -0.155], [-0.35, -0.155], [-0.35, 0.155]]"
+      # one layer, disabled by default (an empty list kills the node). Day 1 has no obstacles;
+      # enable with LiDAR /scan only if the other team's robot must be guarded against.
+      plugins: ["obstacle_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: false
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: "LaserScan"
+          marking: true
+          clearing: true
+          max_obstacle_height: 1.0
+          obstacle_max_range: 2.5
+          raytrace_max_range: 3.0
