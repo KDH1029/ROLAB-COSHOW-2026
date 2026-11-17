@@ -1,0 +1,30 @@
+# ROS 2 Build Artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# C++ / IDE
+*.o
+*.so
+*.a
+.vscode/
+.idea/
+*.swp
+*~
+
+# Large Sensor Logs & Weights
+*.bag
+*.mcap
+*.pcd
+*.onnx
+*.engine
+*.tar.gz
+*.zip
