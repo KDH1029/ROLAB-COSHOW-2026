@@ -21,7 +21,7 @@ import rclpy
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py import point_cloud2 as pc2
 from rcl_interfaces.msg import ParameterDescriptor
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, Path
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from std_msgs.msg import String
@@ -55,6 +55,8 @@ class FakeWorld(Node):
         self.wall_dims = (9.00, 7.01)                        # measured 11-18 (nominal 9.00 x 7.00)
         self.lio0 = (-0.8, 1.6, 2.0)                         # FAST-LIO origin: wherever it started
         self.lio_yaw_drift = math.radians(float(p('lio_yaw_drift_dps', 0.03).value))
+        self.light_on = bool(p('light_on', True).value)      # false: no light messages at all (runner must wait)
+        self.path_check = None                              # the runner's path vs the true lane centre
         self.R = T.R_CENTER[self.lane]
         self.lap = T.LAP_LEN[self.lane]
         self.x, self.y, self.yaw = pose_at_s(s0 - 0.30, self.R, off0)
@@ -90,6 +92,7 @@ class FakeWorld(Node):
         self.pub_cloud = self.create_publisher(PointCloud2, '/lidar_points', 5)
         self.pub_light = self.create_publisher(String, '/mission/traffic_light_state', 10)
         self.create_subscription(String, '/track/status', self.cb_status, 5)
+        self.create_subscription(Path, '/track/path', self.cb_path, 2)
         self.runner_state = ''
         self.create_timer(0.02, self.step)
         self.create_timer(0.1, self.light)
@@ -158,6 +161,25 @@ class FakeWorld(Node):
         except ValueError:
             pass
 
+    def cb_path(self, m):
+        """First path while the runner waits: shift (translation fit) and rms against the true lane centre."""
+        if self.path_check is not None or self.runner_state != 'WAIT' or len(m.poses) < 60:
+            return
+        t = time.time() - self.t0
+        lio0 = (self.lio0[0], self.lio0[1], self.lio0[2] + self.lio_yaw_drift * t)
+        P = TP.apply(TP.inverse(lio0), [(q.pose.position.x, q.pose.position.y) for q in m.poses])[30:]   # past the blend
+        loop = TP.RulebookLoop(self.lane)
+        sh = np.zeros(2)
+        for _ in range(8):
+            Q = P - sh
+            C = np.array([loop.pose_at(loop.station(x, y))[:2] for x, y in Q])
+            sh += (Q - C).mean(0)
+        Q = P - sh
+        C = np.array([loop.pose_at(loop.station(x, y))[:2] for x, y in Q])
+        self.path_check = dict(path_shift_cm=[round(100 * float(v), 1) for v in sh],
+                               path_rms_cm=round(100 * float(np.sqrt(((Q - C) ** 2).sum(1).mean())), 2),
+                               path_len_m=round(float(np.hypot(*np.diff(P, axis=0).T).sum()), 2))
+
     def cb_req(self, m):
         a = m.header.identity.api_id
         if self.t_first_req is None:
@@ -181,6 +203,8 @@ class FakeWorld(Node):
     def light(self):
         t = time.time() - self.t0
         green = self.t_first_req is not None and t >= self.t_first_req + self.t_green
+        if not self.light_on:
+            return
         self.pub_light.publish(String(data='GREEN|0.90' if green else 'RED|0.90'))
         if green and self.t_go is None:
             self.t_go = t
@@ -268,8 +292,10 @@ class FakeWorld(Node):
 
     def summary(self):
         lap = (self.t_fin - self.t_go) if (self.t_fin and self.t_go) else None
-        return dict(lap_s=lap, margin_cm=round(self.min_margin * 100, 1), viol=self.viol,
-                    overshoot_m=round(self.prog - self.need, 2), runner=self.runner_state)
+        d = dict(lap_s=lap, margin_cm=round(self.min_margin * 100, 1), viol=self.viol,
+                 overshoot_m=round(self.prog - self.need, 2), runner=self.runner_state, moved_m=round(self.prog, 2))
+        d.update(self.path_check or {})
+        return d
 
 
 def main():

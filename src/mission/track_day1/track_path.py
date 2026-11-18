@@ -75,6 +75,88 @@ def pose_at(lane, s, off=0.0):
     return x - off * math.sin(yaw), y + off * math.cos(yaw), wrap(yaw)
 
 
+class RulebookLoop:
+    """The lane centre from the rulebook drawing (default path)."""
+
+    def __init__(self, lane):
+        self.lane, self.length, self.name = lane, lap_len(lane), 'rulebook'
+
+    def pose_at(self, s, off=0.0):
+        return pose_at(self.lane, s, off)
+
+    def station(self, x, y):
+        return station(self.lane, x, y)
+
+
+class PinLoop:
+    """A closed loop through pins (track frame), smoothed (periodic Catmull-Rom) and resampled every `ds`.
+    Station = arc length along the loop, starting at `s0` at the first pin."""
+
+    def __init__(self, xy, s0=0.0, ds=0.1, name='pins'):
+        P = np.asarray(xy, float)[:, :2]
+        if len(P) > 2 and math.hypot(*(P[0] - P[-1])) < 1e-6:
+            P = P[:-1]
+        if len(P) < 4:
+            raise ValueError('need at least 4 pins')
+        u = np.linspace(0.0, 1.0, 10, endpoint=False)[:, None]
+        p0, p1, p2, p3 = np.roll(P, 1, 0), P, np.roll(P, -1, 0), np.roll(P, -2, 0)
+        dense = []
+        for a, b, c, d in zip(p0, p1, p2, p3):
+            dense.append(0.5 * ((2 * b) + (-a + c) * u + (2 * a - 5 * b + 4 * c - d) * u ** 2 + (-a + 3 * b - 3 * c + d) * u ** 3))
+        D = np.vstack(dense + [P[:1]])
+        L = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(D, axis=0).T))])
+        self.length = float(L[-1])
+        n = max(8, int(round(self.length / ds)))
+        sq = np.linspace(0.0, self.length, n, endpoint=False)
+        self.pts = np.column_stack([np.interp(sq, L, D[:, 0]), np.interp(sq, L, D[:, 1])])
+        self.s = sq
+        self.s0, self.name = float(s0), name
+        nxt = np.roll(self.pts, -1, 0)
+        self.seg = nxt - self.pts
+        self.seg_len = np.hypot(self.seg[:, 0], self.seg[:, 1])
+        self.yaw = np.arctan2(self.seg[:, 1], self.seg[:, 0])
+
+    def pose_at(self, s, off=0.0):
+        u = (s - self.s0) % self.length
+        i = min(int(np.searchsorted(self.s, u, side='right')) - 1, len(self.s) - 1)
+        f = (u - self.s[i]) / max(1e-9, self.seg_len[i])
+        x, y = self.pts[i] + f * self.seg[i]
+        yaw = float(self.yaw[i])
+        return x - off * math.sin(yaw), y + off * math.cos(yaw), yaw
+
+    def station(self, x, y):
+        d = np.array([x, y]) - self.pts
+        f = np.clip((d * self.seg).sum(1) / np.maximum(1e-12, self.seg_len ** 2), 0.0, 1.0)
+        e = d - f[:, None] * self.seg
+        i = int(np.argmin((e * e).sum(1)))
+        return self.s0 + self.s[i] + f[i] * self.seg_len[i]
+
+
+def load_pins(path, lane):
+    """Pins CSV (lane,station_m,x_m,y_m,yaw_deg; same start-relative track frame) -> PinLoop of that lane."""
+    rows = []
+    with open(path) as fh:
+        head = fh.readline().strip().split(',')
+        k = {n: i for i, n in enumerate(head)}
+        for line in fh:
+            v = line.strip().split(',')
+            if len(v) < len(head) or int(float(v[k['lane']])) != lane:
+                continue
+            rows.append((float(v[k['station_m']]), float(v[k['x_m']]), float(v[k['y_m']])))
+    if len(rows) < 10:
+        raise ValueError('%s: %d pins for lane %d (need >= 10)' % (path, len(rows), lane))
+    rows.sort()
+    R = np.array(rows)
+    return PinLoop(R[:, 1:3], s0=R[0, 0], name='pins %s (%d)' % (path.split('/')[-1], len(rows)))
+
+
+def lateral_of(loop, x, y):
+    """Signed offset (+ = left of travel) and heading of the closest loop point."""
+    s = loop.station(x, y)
+    cx, cy, cyaw = loop.pose_at(s)
+    return -(x - cx) * math.sin(cyaw) + (y - cy) * math.cos(cyaw), cyaw, s
+
+
 def smoothstep(u):
     u = min(1.0, max(0.0, u))
     return u * u * (3 - 2 * u)
@@ -87,9 +169,10 @@ class LanePlan:
     the centre (no sharp correction towards a line right after the start).
     """
 
-    def __init__(self, lane, s_start, lat0, extra=1.2, blend_m=2.0, ds=0.10):
+    def __init__(self, lane, s_start, lat0, extra=1.2, blend_m=2.0, ds=0.10, loop=None):
         self.lane, self.s_start, self.lat0 = lane, s_start, lat0
-        self.s_end = s_start + lap_len(lane) + extra
+        self.loop = loop or RulebookLoop(lane)
+        self.s_end = s_start + self.loop.length + extra
         self.blend_m, self.ds = blend_m, ds
 
     def off(self, s):
@@ -99,18 +182,19 @@ class LanePlan:
         s_to = self.s_end if s_to is None else min(s_to, self.s_end)
         s_from = max(self.s_start - 0.5, s_from)
         n = max(2, int(math.ceil((s_to - s_from) / self.ds)) + 1)
-        return np.array([pose_at(self.lane, s, self.off(s))[:2] for s in np.linspace(s_from, s_to, n)])
+        return np.array([self.loop.pose_at(s, self.off(s))[:2] for s in np.linspace(s_from, s_to, n)])
 
 
 class Progress:
     """Station of the robot since the start, unwrapped over laps (closest centre point near the last one)."""
 
-    def __init__(self, lane, s_start):
+    def __init__(self, lane, s_start, loop=None):
         self.lane, self.s = lane, s_start
+        self.loop = loop or RulebookLoop(lane)
 
     def feed(self, x, y, max_jump=1.0):
-        lap = lap_len(self.lane)
-        s0 = station(self.lane, x, y)
+        lap = self.loop.length
+        s0 = self.loop.station(x, y)
         k = round((self.s - s0) / lap)
         s = s0 + k * lap
         if abs(s - self.s) < max_jump:      # at 20 Hz a jump > 1 m is a bad pose, keep the old one
@@ -122,9 +206,15 @@ class Progress:
 class StartLock:
     """Pools wall_align poses taken while standing. Each one gives track <- odom = wall o odom^-1; the start is
     accepted when the last `n` of those agree within tol (robot still, walls consistent), and the pose is
-    plausible for the lane: lateral offset and heading within the limits."""
+    plausible for the lane: lateral offset and heading within the limits.
 
-    def __init__(self, lane, n=5, tol_m=0.03, tol_deg=1.0, max_lat=0.35, max_head_deg=15.0):
+    offset = (dx, dy, dyaw): the drawn track centre relative to the wall-rectangle centre, in the start-relative
+    frame (the robot's start on the lower half y < 0, travel +x along the start straight). Default 0."""
+
+    def __init__(self, lane, n=5, tol_m=0.03, tol_deg=1.0, max_lat=0.35, max_head_deg=15.0, loop=None,
+                 offset=(0.0, 0.0, 0.0)):
+        self.loop = loop or RulebookLoop(lane)
+        self.off_inv = inverse(tuple(offset))
         self.lane, self.n, self.tol_m, self.tol = lane, n, tol_m, math.radians(tol_deg)
         self.max_lat, self.max_head = max_lat, math.radians(max_head_deg)
         self.buf = []
@@ -141,7 +231,8 @@ class StartLock:
             p = self.buf[0][1]
             if math.hypot(tw[0] - p[0], tw[1] - p[1]) > math.hypot(-tw[0] - p[0], -tw[1] - p[1]):
                 tw = (-tw[0], -tw[1], wrap(tw[2] + math.pi))
-        self.buf.append((compose(tw, inverse(odom)), tw, odom))
+        tt = compose(self.off_inv, tw)        # wall frame -> track frame (drawn track centre)
+        self.buf.append((compose(tt, inverse(odom)), tw, odom))
         self.buf = self.buf[-self.n:]
         if len(self.buf) < self.n:
             self.why = 'pooling %d/%d' % (len(self.buf), self.n)
@@ -155,15 +246,14 @@ class StartLock:
             return None
         Tto = (float(A[:, 0].mean()), float(A[:, 1].mean()), yc)
         pose = compose(Tto, self.buf[-1][2])
-        s = station(self.lane, pose[0], pose[1])
-        cx, cy, cyaw = pose_at(self.lane, s)
-        lat = -(pose[0] - cx) * math.sin(cyaw) + (pose[1] - cy) * math.cos(cyaw)
+        lat, cyaw, s = lateral_of(self.loop, pose[0], pose[1])
         head = wrap(pose[2] - cyaw)
+        lat_rb = lateral_of(RulebookLoop(self.lane), pose[0], pose[1])[0]   # lane membership: rulebook lanes
         other = 2 if self.lane == 1 else 1
         s2 = station(other, pose[0], pose[1])
         c2 = pose_at(other, s2)
         lat2 = -(pose[0] - c2[0]) * math.sin(c2[2]) + (pose[1] - c2[1]) * math.cos(c2[2])
-        if abs(lat2) < abs(lat):
+        if abs(lat2) < abs(lat_rb):
             self.why = 'robot is in lane %d (%.2f m from its centre), not lane %d' % (other, abs(lat2), self.lane)
             return None
         if abs(lat) > self.max_lat or abs(head) > self.max_head:

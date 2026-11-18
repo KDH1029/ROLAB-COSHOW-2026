@@ -33,15 +33,29 @@ Config: `config/day1_nav2.yaml` (controller_server + RPP), `config/fastlio/fastl
 ```bash
 scripts/day1.sh light                # YOLO traffic-light node (internal PC)
 scripts/day1.sh up                   # robot standing still: imu/cloud bridge, FAST-LIO, odom TF, motor bridge, controller_server
-scripts/day1.sh run lane=2 v=0.5     # robot on its start mark; space / x = STOP
+scripts/day1.sh run in v=0.5        # inner lane (out = outer lane); robot on its start mark; space / x = STOP
 scripts/day1.sh down
 ```
-Runner parameters: `lane` (1 outer, 2 inner), `v` (m/s), `extra` (m past one lap, default 1.2), `green_s`, `light` (`model`, `none` for tests only), `gait`, `max_lat` (0.35 m), `max_head` (15°), `lock_n` (5 scans).
+`run` drives one counter-clockwise lap of the chosen lane, plus `extra`, then stops.
+
+Runner parameters: `in` / `out` (or `lane` = 2 / 1), `v` (m/s), `extra` (m past one lap, default 1.2), `green_s`, `light` (`model`, `none` for tests only), `gait`, `max_lat` (0.35 m), `max_head` (15°), `lock_n` (5 scans), `track_dx` / `track_dy` / `track_dyaw_deg`, `path_file` (below).
+
+### Changing the path (default: none)
+The wall fit gives the centre of the wall rectangle. By default the drawn track is assumed to sit exactly in it, 0.495 m from the wall on every side (rulebook).
+
+**Track offset**: `track_dx`, `track_dy` (m), `track_dyaw_deg`. This is the drawn track centre relative to the wall centre, in the **start-relative frame**: the robot's start straight is at the bottom (y < 0) and travel along it is +x. Measure the gap from the track's outer line to the wall with a tape on all four sides:
+- `track_dx` = (gap behind the robot − gap ahead) / 2
+- `track_dy` = (gap on the start-straight side − gap on the opposite side) / 2
+- `track_dyaw_deg` = degrees((gap on the start side at the front end of the straight − at the back end) / 2.0), measured at both ends of the 2.0 m straight
+
+★ Starting on the opposite straight turns this frame by 180°: `track_dx` and `track_dy` change sign, `track_dyaw_deg` stays the same.
+
+**Pin file**: `path_file=/path/pins.csv`. Columns `lane,station_m,x_m,y_m,yaw_deg`, in the same start-relative track frame. The pins of the chosen lane are read in station order as a closed loop, smoothed and resampled every 0.1 m. Progress and the lap end are measured along that loop. `yaw_deg` is not used. The 0.5 m rulebook pins (`logs/pins/day1_pins.csv`) give the default path within 4–6 mm. `track_dx/dy/dyaw` apply on top.
 
 ## On site
 1. `up` refuses if bridges, FAST-LIO or a controller from another stack run on the same ROS domain. Stop those first. FAST-LIO initialises its IMU at start-up, so the robot must stand still.
-2. `run` logs `start found: lane …, lateral …, heading …` within about 1 s of ClassicWalk. If it says `robot is in lane X, not lane Y` or `placement: …`, re-place the robot. The run does not start until the start is found.
-3. `light`: the model was trained on the RoboWorld light. Check it sees the CO SHOW light before the first run.
+2. `run` logs `start found: lane …, lateral …, heading …` within about 1 s of ClassicWalk and saves `logs/day1/plan_HHMMSS.png` (start and end on the lane centre, the robot where it stands). If it says `robot is in lane X, not lane Y` or `placement: …`, re-place the robot. The run does not start until the start is found.
+3. `light` before `run`: the runner starts only after GREEN for 0.5 s with no RED in the last 1 s (same light as RoboWorld). Without light messages it waits and warns. `lightcheck [s]` watches the light without moving the robot.
 4. Lane 1 needs ≥ 0.36 m/s average to finish inside 60 s. `v=0.5` gives ~44 s on lane 1 and ~33 s on lane 2. Raise it only after a clean run.
 5. The runner stops 1.2 m after the lap. Timing ends when the rear feet cross the line, so the overshoot costs nothing.
 
@@ -50,6 +64,7 @@ Runner parameters: `lane` (1 outer, 2 inner), `v` (m/s), `extra` (m past one lap
 tests/day1_ros_integration.sh lane=1 off0=-0.25 yaw0=-10        # real Nav2 + bridge + runner, fake robot (domain 81, loopback)
 tests/fastlio_replay.sh <bag> out.csv domain=82                 # FAST-LIO on a recording (loopback)
 python3 tools/odom_vs_wall.py <bag> traj=out.csv scales=1.0     # its error against the wall poses
+python3 tools/plot_plan.py                                      # picture: start and end on the lane centre, both courses
 ```
 
 | Check (recordings of 11-18, arena) | Result |
@@ -65,5 +80,9 @@ python3 tools/odom_vs_wall.py <bag> traj=out.csv scales=1.0     # its error agai
 | lane 2 / lane 1 at 0.5 m/s | 32.6 s / 44.5 s, no line crossing, foot margin ≥ 24 cm |
 | lane 1 at 0.8 m/s from the curve | 28.1 s, no line crossing |
 | placed 0.25 m off and 10° towards the line | no line crossing (margin 0.9–1.9 cm, set by the placement itself) |
+| `path_file=logs/pins/day1_pins.csv`, in / out | same as the default: lap time within 0.3 s, path within 0.3 cm (rms 0.1–0.15 cm) |
+| `track_dx=0.05` / `track_dy=0.05` | path moved 4.9 / 5.0 cm in x / y, no line crossing |
+| through `day1.sh run out` | 44.5 s, no line crossing |
+| no traffic-light messages | waits at the start (moved 0.0 m), warns every 3 s |
 
 Not yet run on the robot.

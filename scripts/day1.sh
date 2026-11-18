@@ -7,8 +7,11 @@
 #   day1.sh vision start  camera (if not running) + edge node on the internal PC
 #   day1.sh vision snap   camera + bird's-eye check images -> logs/snap/
 #   day1.sh light         start the YOLO traffic-light node (~/junsu_vision on the internal PC)
+#   day1.sh lightcheck [s] watch the real light for s seconds the way the runner does (robot does not move)
 #   day1.sh status        rates of the topics that matter
-#   day1.sh run lane=2 v=0.5 [light=none] [extra=1.2] [mode=vision]   ★ stand the robot first; space/x = STOP
+#   day1.sh run in|out [v=0.5] [light=none] [extra=1.2] [track_dx=0 track_dy=0 track_dyaw_deg=0] [path_file=pins.csv]
+#                         in = inner lane (2), out = outer lane (1); one counter-clockwise lap, then stop.
+#                         ★ stand the robot on its start mark first; space/x = STOP
 #   day1.sh down          stop what `up` started
 #   day1.sh test          offline checks (vision, closed-loop sim)
 set -uo pipefail
@@ -109,6 +112,8 @@ case "${1:-}" in
       *) echo "vision push|start|stop|status|snap";;
     esac;;
   light) "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh start';;
+  lightcheck)   # robot does not move: camera on, watch the real light for N s (default 20), camera off
+    env_ros; python3 "$ROOT/src/vision/start_light/check_tl_live.py" "${2:-20}";;
   status)
     env_ros
     for tp in /lidar_points /Odometry /mission/traffic_light_state /utlidar/robot_odom /cmd_vel /lowstate; do
@@ -117,7 +122,9 @@ case "${1:-}" in
     ros2 lifecycle get /go2_cmd_vel_to_sport 2>/dev/null; ros2 lifecycle get /controller_server 2>/dev/null;;
   run)
     env_ros; shift
-    A=(); for kv in "$@"; do A+=(-p "${kv%%=*}:=${kv#*=}"); done
+    A=(); for kv in "$@"; do
+      case $kv in in|out) A+=(-p "lane:=$kv");; *=*) A+=(-p "${kv%%=*}:=${kv#*=}");; *) echo "★ unknown argument $kv (in|out key=value)"; exit 1;; esac
+    done
     python3 "$TD/day1_runner_node.py" --ros-args "${A[@]}" 2>&1 | tee "$LOG/run_$(date +%H%M%S).log";;
   test)
     cd "$TD" && python3 sim/eval_vision.py base,glare && python3 sim/sim_day1.py --only lane2,lane1,lane2_place;;

@@ -69,7 +69,10 @@ class Day1Runner(Node):
         super().__init__('day1_runner')
         def p(name, default):   # numbers typed as 1 or 1.0 both work
             return self.declare_parameter(name, default, ParameterDescriptor(dynamic_typing=True))
-        self.lane = int(p('lane', 2).value)
+        lane = str(p('lane', 2).value).strip().lower()       # 1 / out = outer lane, 2 / in = inner lane
+        self.lane = {'1': 1, 'out': 1, 'outer': 1, '2': 2, 'in': 2, 'inner': 2}.get(lane)
+        if self.lane is None:
+            raise SystemExit('lane must be in (2) or out (1), got %r' % lane)
         self.mode = str(p('mode', 'wall').value)               # wall | vision
         self.v = float(p('v', 0.5).value)
         self.extra = float(p('extra', 1.2).value)
@@ -89,16 +92,23 @@ class Day1Runner(Node):
         self.max_lat = float(p('max_lat', 0.35).value)       # m from the lane centre at the start
         self.max_head = float(p('max_head', 15.0).value)     # deg
         self.blend_m = float(p('blend_m', 2.0).value)        # ease from the start offset onto the centre
+        # drawn track centre vs wall-rectangle centre, start-relative frame (README: from the 4 gaps to the wall)
+        self.track_off = (float(p('track_dx', 0.0).value), float(p('track_dy', 0.0).value),
+                          math.radians(float(p('track_dyaw_deg', 0.0).value)))
+        self.path_file = str(p('path_file', '').value)       # '' = rulebook lane centre
         if self.mode not in ('wall', 'vision'):
             raise SystemExit('mode must be wall or vision')
 
         self.tf = Buffer(cache_time=Duration(seconds=5.0))
         self.tfl = TransformListener(self.tf, self)
         self.path = LP.LanePath(self.lane)          # vision mode
-        self.wlock = TP.StartLock(self.lane, n=self.lock_n, max_lat=self.max_lat, max_head_deg=self.max_head)
+        self.loop = TP.load_pins(self.path_file, self.lane) if self.path_file else TP.RulebookLoop(self.lane)
+        self.wlock = TP.StartLock(self.lane, n=self.lock_n, max_lat=self.max_lat, max_head_deg=self.max_head,
+                                  loop=self.loop, offset=self.track_off)
         self.plan = self.prog = self.T_to = self.T_ot = None   # wall mode: plan in the track frame, track <- odom
         self.sub_lidar = None
         self.lock_t0 = None
+        self.cam_pub_t = 0.0      # camera_active is re-sent every second (a single message can be lost)
         self.gate = DL.LightGate(need_s=self.green_s)
         self.lap = DL.LapEnd(self.lane, extra=self.extra)
         self.state = 'GAIT' if self.gait else 'LOCK'
@@ -134,9 +144,14 @@ class Day1Runner(Node):
 
         ok, msg = DL.speed_check(self.lane, self.v, self.extra)
         self.get_logger().info(('' if ok else '★ ') + msg)
-        self.get_logger().info('lane %d · v %.2f · mode %s · light %s · gait %s — space/x = STOP, q = quit'
-                               % (self.lane, self.v, self.mode, self.light, self.gait))
+        self.get_logger().info('lane %d (%s course, counter-clockwise, one lap + %.1f m) · v %.2f · mode %s · light %s · gait %s'
+                               ' — space/x = STOP, q = quit'
+                               % (self.lane, 'in' if self.lane == 2 else 'out', self.extra, self.v, self.mode, self.light, self.gait))
         self.set_rpp_speed(self.v)
+        if self.mode == 'wall':
+            self.get_logger().info('path: %s, %.2f m/lap (rulebook %.2f) · track offset dx %+.3f dy %+.3f m dyaw %+.2f deg'
+                                   % (self.loop.name, self.loop.length, T.LAP_LEN[self.lane], self.track_off[0],
+                                      self.track_off[1], math.degrees(self.track_off[2])))
         if self.state == 'LOCK':
             self.start_lock()
 
@@ -228,8 +243,9 @@ class Day1Runner(Node):
         with self.lock:
             self.T_to = res['T_track_odom']
             self.T_ot = TP.inverse(self.T_to)
-            self.plan = TP.LanePlan(self.lane, res['s'], res['lateral'], extra=self.extra, blend_m=self.blend_m)
-            self.prog = TP.Progress(self.lane, res['s'])
+            self.plan = TP.LanePlan(self.lane, res['s'], res['lateral'], extra=self.extra, blend_m=self.blend_m,
+                                    loop=self.loop)
+            self.prog = TP.Progress(self.lane, res['s'], loop=self.loop)
             self.lock_res = res
             self.state = 'WAIT'
         self.get_logger().info('start found: lane %d, station %.2f m, lateral %+.3f m, heading %+.1f deg '
@@ -239,9 +255,26 @@ class Day1Runner(Node):
                                   self.plan.s_end - self.plan.s_start))
         self.destroy_subscription(self.sub_lidar)
         self.sub_lidar = None
+        threading.Thread(target=self.save_plan_png, args=(res,), daemon=True).start()
         self.pub_cam.publish(Bool(data=True))
         self.bridge_state(True)
         self.set_rpp_speed(self.v)
+
+    def save_plan_png(self, res):
+        """Picture of this run: start and end on the lane centre line, the robot where it actually stands."""
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tools'))
+            import plot_plan
+            root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../..'))
+            out = os.path.join(os.environ.get('DAY1_LOG', os.path.join(root, 'logs/day1')),
+                               'plan_%s.png' % time.strftime('%H%M%S'))
+            plot_plan.save_plan(out, self.lane, res['s'], self.extra, self.loop, res['pose'], res['lateral'], self.blend_m,
+                                title='%s코스 (%d레인): 출발 station %.2f m, 옆 %+.2f m, 방향 %+.1f°' % (
+                                    '인' if self.lane == 2 else '아웃', self.lane, res['s'], res['lateral'],
+                                    math.degrees(res['heading_err'])))
+            self.get_logger().info('plan picture: %s' % out)
+        except Exception as e:      # a picture must never stop the run
+            self.get_logger().warn('plan picture failed: %s' % e)
 
     def track_pose(self, cur):
         return TP.compose(self.T_to, cur)
@@ -356,12 +389,18 @@ class Day1Runner(Node):
             tp = self.track_pose(cur)
             if self.state == 'WAIT':
                 s_r = self.plan.s_start
+                if t - self.cam_pub_t > 1.0:            # light node: judge the light now
+                    self.pub_cam.publish(Bool(data=True))
+                    self.cam_pub_t = t
                 go = self.gate.go(t) if self.light != 'none' else True
                 if go:
                     self.state, self.t_go = 'RUN', t
                     self.pub_cam.publish(Bool(data=False))
                     self.get_logger().info('GREEN — go')
             elif self.state in ('RUN', 'FINISH'):
+                if self.state == 'RUN' and t - self.t_go < 3.0 and t - self.cam_pub_t > 1.0:
+                    self.pub_cam.publish(Bool(data=False))   # light no longer needed (repeat: one can be lost)
+                    self.cam_pub_t = t
                 s_r = self.prog.feed(tp[0], tp[1])
                 if self.state == 'RUN' and self.plan.s_end - s_r < 0.25:
                     self.state = 'FINISH'
@@ -435,10 +474,13 @@ class Day1Runner(Node):
             if self.state == 'LOCK' and self.plan is None and self.lock_t0 is not None and self.now_s() - self.lock_t0 > 5.0:
                 self.get_logger().warn('★ no start yet after %.0f s: %s' % (self.now_s() - self.lock_t0, self.wlock.why),
                                        throttle_duration_sec=5.0)
+            if self.state == 'WAIT' and self.light != 'none' and self.now_s() - self.gate.last_msg > 3.0:
+                self.get_logger().warn('★ 신호등 메시지 없음 (/mission/traffic_light_state) — day1.sh light 로 내부 PC YOLO 를 켰나요? '
+                                       '초록을 봐야만 출발합니다', throttle_duration_sec=3.0)
             lat, s_done = '-', 0.0
             if cur is not None and self.plan is not None:
                 tp = self.track_pose(cur)
-                lat = '%+.3f' % T.lane_frame(self.lane, tp[0], tp[1])[0]
+                lat = '%+.3f' % TP.lateral_of(self.loop, tp[0], tp[1])[0]
                 s_done = self.prog.s - self.plan.s_start
             total = (self.plan.s_end - self.plan.s_start) if self.plan else 0.0
             self.get_logger().info('%s | lateral %s m · lap %.1f/%.1f m · scans %d ok %d · light %s'
