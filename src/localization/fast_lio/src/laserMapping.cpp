@@ -158,6 +158,7 @@ bool   leg_vel_en = false;
 double leg_vel_noise = 0.10;   // m/s (1σ)
 double leg_gate_chi2 = 9.21;   // 자유도 2, 99%
 double leg_window = 0.10;      // s, 속도 계산 창
+double leg_scale = 1.0;        // robot_odom 거리 배율 (Go2 내장 오도는 16% 짧다: 1.189, 11-04~06 주행 5개)
 long   leg_used = 0, leg_rejected = 0, leg_nodata = 0, leg_rejected_bigjump = 0;
 double leg_max_pos_jump = 0.3;   // m, 한 번의 보정으로 허용하는 최대 위치 변화 (2026-11-02, 누리관 발산 수정)
 long   lidar_rejected_bigjump = 0;
@@ -190,7 +191,7 @@ bool leg_velocity_body(double t, V3D &v_body)
         b = &s;
     }
     if (!a || !b || b->t - a->t < 0.5 * leg_window) return false;
-    V3D v_odom = (b->p - a->p) / (b->t - a->t);
+    V3D v_odom = leg_scale * (b->p - a->p) / (b->t - a->t);
     Eigen::Quaterniond qm = a->q.slerp(0.5, b->q);
     v_body = qm.conjugate() * v_odom;
     return v_body.norm() < 3.0;   // 비정상 값 거부
@@ -1011,6 +1012,7 @@ public:
         this->declare_parameter<std::string>("leg.topic", "/utlidar/robot_odom");
         this->declare_parameter<double>("leg.vel_noise", 0.10);
         this->declare_parameter<double>("leg.gate_chi2", 9.21);
+        this->declare_parameter<double>("leg.scale", 1.0);
         this->declare_parameter<double>("leg.window", 0.10);
         this->declare_parameter<double>("leg.impact_thr", 0.0);
         this->declare_parameter<double>("leg.impact_q_scale", 1.0);
@@ -1064,6 +1066,7 @@ public:
         this->get_parameter_or<double>("leg.vel_noise", leg_vel_noise, 0.10);
         this->get_parameter_or<double>("leg.gate_chi2", leg_gate_chi2, 9.21);
         this->get_parameter_or<double>("leg.window", leg_window, 0.10);
+        this->get_parameter_or<double>("leg.scale", leg_scale, 1.0);
         this->get_parameter_or<double>("mapping.gyr_cov",gyr_cov,0.1);
         this->get_parameter_or<double>("mapping.acc_cov",acc_cov,0.1);
         this->get_parameter_or<double>("mapping.b_gyr_cov",b_gyr_cov,0.0001);
