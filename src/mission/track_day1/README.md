@@ -55,7 +55,7 @@ The wall fit gives the centre of the wall rectangle. By default the drawn track 
 ## On site
 1. `up` refuses if bridges, FAST-LIO or a controller from another stack run on the same ROS domain. Stop those first. FAST-LIO initialises its IMU at start-up, so the robot must stand still.
 2. `run` logs `start found: lane …, lateral …, heading …` within about 1 s of ClassicWalk and saves `logs/day1/plan_HHMMSS.png` (start and end on the lane centre, the robot where it stands). If it says `robot is in lane X, not lane Y` or `placement: …`, re-place the robot. The run does not start until the start is found.
-3. `light` before `run`: the runner starts only after GREEN for 0.5 s with no RED in the last 1 s (same light as RoboWorld). Without light messages it waits and warns. `lightcheck [s]` watches the light without moving the robot.
+3. `light` before `run`: the runner starts only after GREEN for 0.5 s with no RED in the last 1 s (same light as RoboWorld). Without light messages it waits and warns; press `g` in the runner terminal to start anyway. `lightcheck [s]` watches the light without moving the robot.
 4. Lane 1 needs ≥ 0.36 m/s average to finish inside 60 s. `v=0.5` gives ~44 s on lane 1 and ~33 s on lane 2. Raise it only after a clean run.
 5. The runner stops 1.2 m after the lap. Timing ends when the rear feet cross the line, so the overshoot costs nothing.
 

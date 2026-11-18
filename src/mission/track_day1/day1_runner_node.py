@@ -109,6 +109,7 @@ class Day1Runner(Node):
         self.sub_lidar = None
         self.lock_t0 = None
         self.cam_pub_t = 0.0      # camera_active is re-sent every second (a single message can be lost)
+        self.force_go = False     # key g while waiting: start without the light
         self.gate = DL.LightGate(need_s=self.green_s)
         self.lap = DL.LapEnd(self.lane, extra=self.extra)
         self.state = 'GAIT' if self.gait else 'LOCK'
@@ -145,7 +146,7 @@ class Day1Runner(Node):
         ok, msg = DL.speed_check(self.lane, self.v, self.extra)
         self.get_logger().info(('' if ok else '★ ') + msg)
         self.get_logger().info('lane %d (%s course, counter-clockwise, one lap + %.1f m) · v %.2f · mode %s · light %s · gait %s'
-                               ' — space/x = STOP, q = quit'
+                               ' — space/x = STOP, g = 강제 출발(신호등 대기 중), q = quit'
                                % (self.lane, 'in' if self.lane == 2 else 'out', self.extra, self.v, self.mode, self.light, self.gait))
         self.set_rpp_speed(self.v)
         if self.mode == 'wall':
@@ -357,7 +358,7 @@ class Day1Runner(Node):
                 fresh = self.last_edge_t is not None and t - self.last_edge_t < self.coast_s
                 self.path.advance(cur[0], cur[1], extend=fresh)
             if self.state == 'WAIT':
-                go = self.gate.go(t) if self.light != 'none' else True
+                go = self.force_go or (self.gate.go(t) if self.light != 'none' else True)
                 if go:
                     self.state, self.t_go = 'RUN', t
                     self.lap.feed(cur[0], cur[1])
@@ -392,7 +393,7 @@ class Day1Runner(Node):
                 if t - self.cam_pub_t > 1.0:            # light node: judge the light now
                     self.pub_cam.publish(Bool(data=True))
                     self.cam_pub_t = t
-                go = self.gate.go(t) if self.light != 'none' else True
+                go = self.force_go or (self.gate.go(t) if self.light != 'none' else True)
                 if go:
                     self.state, self.t_go = 'RUN', t
                     self.pub_cam.publish(Bool(data=False))
@@ -476,7 +477,7 @@ class Day1Runner(Node):
                                        throttle_duration_sec=5.0)
             if self.state == 'WAIT' and self.light != 'none' and self.now_s() - self.gate.last_msg > 3.0:
                 self.get_logger().warn('★ 신호등 메시지 없음 (/mission/traffic_light_state) — day1.sh light 로 내부 PC YOLO 를 켰나요? '
-                                       '초록을 봐야만 출발합니다', throttle_duration_sec=3.0)
+                                       '초록을 봐야만 출발합니다 (g = 강제 출발)', throttle_duration_sec=3.0)
             lat, s_done = '-', 0.0
             if cur is not None and self.plan is not None:
                 tp = self.track_pose(cur)
@@ -512,6 +513,9 @@ def key_loop(node):
             ch = sys.stdin.read(1)
             if ch in (' ', 'x', 'X'):
                 node.stop('key')
+            elif ch in ('g', 'G') and node.state == 'WAIT':
+                node.force_go = True
+                node.get_logger().warn('★ g — 신호등 없이 강제 출발')
             elif ch in ('q', 'Q'):
                 node.stop('quit')
                 time.sleep(0.3)
