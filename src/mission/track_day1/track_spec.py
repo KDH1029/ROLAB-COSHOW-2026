@@ -39,10 +39,11 @@ def min_avg_speed(lane, extra=1.0, limit_s=60.0, start_delay=1.5):
 
 
 # ---------------------------------------------------------------------------------------------- walls
-# Not in the rulebook. Measured on site 11-18: a 0.6 m wall about 0.30 m outside the track outline on all
-# four sides, no gaps -> a rectangle around the stadium, same centre. Track frame: origin = track centre,
-# x = long axis (straights parallel to x), z up; counter-clockwise travel.
-WALL_GAP = 0.30
+# Not in the rulebook as a wall: the 0.6 m wall stands on the edge of the 9000 x 7000 floor plate (rulebook 5.1,
+# margin 495 mm around the 8010 x 6010 track), no gaps. Measured 11-18 from the XT16 (bags 133542/134210):
+# 9.00 x 7.01 m between the inner faces. (By eye it looked like 0.30 m from the outline; the lidar says 0.5 m.)
+# Track frame: origin = track centre, x = long axis (straights parallel to x), z up; counter-clockwise travel.
+WALL_GAP = 0.495
 WALL_H = 0.60
 WALL_LX = 2 * (STRAIGHT / 2 + R_OUTER) + 2 * WALL_GAP     # 8.61 m, inner face to inner face
 WALL_LY = 2 * R_OUTER + 2 * WALL_GAP                       # 6.61 m

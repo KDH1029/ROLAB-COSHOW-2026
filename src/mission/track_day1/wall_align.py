@@ -14,7 +14,7 @@ same centre as the track (track_spec). align() finds the robot pose (x, y, yaw) 
   6. pose: the robot is at minus the wall-centre in the rotated frame
 
 A rectangle looks the same turned 180 deg, and so does the track: the two answers give the same lane
-centre relative to the robot, so either is used (the one with the robot heading counter-clockwise).
+centre relative to the robot, so either will do at the start; while moving, `prior` keeps the same one.
 
 Gates: measured wall spacing within dim_tol of LX/LY on the axes where both walls were seen, enough inlier
 points on at least three walls, inlier rms small. On failure: ok=False and the reason.
@@ -35,7 +35,7 @@ DEFAULTS = dict(
     r_range=(0.5, 12.0),
     yaw_step_deg=1.0,
     bin_m=0.03,
-    dim_tol=0.20,                   # m, measured wall spacing vs WALL_LX / WALL_LY
+    dim_tol=0.12,                   # m, measured wall spacing vs WALL_LX / WALL_LY (real arena: 9.00 x 7.01)
     inlier_m=0.08,
     min_wall_pts=40,
     max_pts=4000,                   # wall-band points kept (random subset): yaw search cost
@@ -117,11 +117,13 @@ def _wall_pair(u, L, cfg):
     return None
 
 
-def align(points_list, cfg=None, seed=0):
+def align(points_list, cfg=None, seed=0, prior=None):
     """points_list: list of (N, 3) arrays in the robot base frame (robot standing still).
 
     Returns dict(ok, x, y, yaw, why, walls_seen, dims, rms, n_in, floor_h). (x, y, yaw) = robot in the
     track frame (centre origin, x along the long axis), heading counter-clockwise.
+    prior = (x, y, yaw) of the last pose: of the two 180 deg twins the one nearer to it is returned
+    (without a prior: the twin with y <= 0, i.e. on the lower half of the drawing).
     """
     c = dict(DEFAULTS)
     if cfg:
@@ -223,10 +225,14 @@ def align(points_list, cfg=None, seed=0):
         x, y, yaw = -cu, -cv, -th
     else:
         x, y, yaw = cv, -cu, -th + math.pi / 2     # track x = -v, track y = u
-    # of the two 180 deg twins, keep the one heading counter-clockwise (tangent . heading > 0)
-    lane = 1 if abs(T.lane_frame(1, x, y)[0]) < abs(T.lane_frame(2, x, y)[0]) else 2
-    if math.cos(T.lane_frame(lane, x, y)[1] - yaw) < 0:
+    # The 180 deg twin (-x, -y, yaw + pi) fits the walls and the track equally well. Pick by the prior,
+    # else the lower half. Both twins head the same way along the track (counter-clockwise or not).
+    if prior is not None:
+        if math.hypot(x - prior[0], y - prior[1]) > math.hypot(-x - prior[0], -y - prior[1]):
+            x, y, yaw = -x, -y, yaw + math.pi
+    elif y > 0:
         x, y, yaw = -x, -y, yaw + math.pi
+    lane = 1 if abs(T.lane_frame(1, x, y)[0]) < abs(T.lane_frame(2, x, y)[0]) else 2
     yaw = math.atan2(math.sin(yaw), math.cos(yaw))
     off_lat, tang = T.lane_frame(lane, x, y)
     out.update(ok=True, why='', x=x, y=y, yaw=yaw, lane=lane, lateral=off_lat,
