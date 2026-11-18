@@ -74,7 +74,7 @@ class TrafficLightTrt(Node):
         self.sub_depth = []
         self.n_gate = self.n_drop = self.n_nodepth = 0
         # ★ 11-05 콘 감지(항상 켬): 같은 추론으로 콘(6클래스 cls 5 · 4클래스 cls 3)도 — YOLO 콘 상자+뎁스(먼 콘) + 주황+뎁스(가까운 콘) → /mission/cone_cam(몸체 좌표)
-        self.declare_parameter('cone_enable', True)
+        self.declare_parameter('cone_enable', False)   # ★ 11-18: 신호등만 — 콘 등 나머지 라벨은 잠시 끔(/mission/cone_cam 을 쓰는 곳 없음). 켜려면 -p cone_enable:=true
         self.declare_parameter('cone_hz', 5.0)          # 정지선 밖(신호등 안 볼 때) 추론 빈도 — 내부 PC 부하 조건(5 Hz)
         self.declare_parameter('cone_conf', 0.45)
         self.declare_parameter('cone_max_m', 3.5)
