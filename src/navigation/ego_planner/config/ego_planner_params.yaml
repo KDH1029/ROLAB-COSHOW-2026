@@ -47,6 +47,18 @@ ego_planner_node:
     max_vy: 0.25                       # m/s lateral (Go2 can strafe)
     goal_tol: 0.25                     # m
 
+    # ---- Pass-through (no stop at intermediate route points) -------------------------------------
+    # A goal is a trajectory that ends at zero velocity, so a route sent one /goal_pose at a time
+    # stops at every point. Publish nav_msgs/Path on pass_through.topic just BEFORE the /goal_pose:
+    # poses[0] = the goal (within 5 cm), poses[1:] = the points after it. The planner then joins the
+    # A* paths through them and only stops at the last one. Used once per matching goal; a plain
+    # /goal_pose (no path, stale path or mismatched first pose) behaves exactly as before.
+    pass_through.enable: true
+    pass_through.topic: /goal_path
+    pass_through.max_age: 1.0          # s, path older than this when the goal arrives is ignored
+    pass_through.pass_radius: 0.6      # m, an intermediate point counts as passed once the robot is within this
+                                       #    and past the corner bisector (a smoothed corner never comes within goal_tol)
+
     # ---- Clearance ------------------------------------------------------------------------------
     # The original used safe_dist (0.45) for both the hard A* inflation and the soft optimizer
     # repulsion. On the 누리관 bag map 42.9 % of the path the robot actually walked fell inside a
@@ -106,6 +118,7 @@ ego_planner_node:
       min_gap: 0.2                     # s, between event-triggered replans
       collision_horizon: 1.5           # s, look-ahead that triggers a replan
       stop_horizon: 0.6                # s, collision this close with no free replan -> hold still
+      max_stitch_lead: 0.35            # m, replan from the robot when the stitch point runs this far ahead of it
       stitch_lead: 0.06                # s, expected planning time for the C2 hand-over
 
     # ---- Tracking controller -------------------------------------------------------------------

@@ -62,16 +62,19 @@ private:
   // Runtime changes via `ros2 param set` (merged from the team's tunable fork, extended)
   rcl_interfaces::msg::SetParametersResult onParamChange(const std::vector<rclcpp::Parameter> & params);
   void configurePlanners(AStar & astar, BsplineOptimizer & opt, const std::shared_ptr<GridMap> & map) const;
+  // vias: points to pass through after `goal` (pass_through.*); the spline only stops at the last one
   bool planOn(const std::shared_ptr<GridMap> & map, const Eigen::Vector2d & p0, const Eigen::Vector2d & v0,
-              const Eigen::Vector2d & a0, const Eigen::Vector2d & goal, BsplineTrajectory & out) const;
+              const Eigen::Vector2d & a0, const Eigen::Vector2d & goal, const std::vector<Eigen::Vector2d> & vias,
+              BsplineTrajectory & out) const;
 
   bool planTrajectory(const Eigen::Vector2d & start_pos, const Eigen::Vector2d & start_vel,
-                      const Eigen::Vector2d & goal_pos);
+                      const Eigen::Vector2d & goal_pos, const std::vector<Eigen::Vector2d> & vias);
   bool asyncReplanWorker(const std::shared_ptr<GridMap> & map_snapshot,
                          const Eigen::Vector2d & p0,
                          const Eigen::Vector2d & v0,
                          const Eigen::Vector2d & a0,
-                         const Eigen::Vector2d & goal);
+                         const Eigen::Vector2d & goal,
+                         const std::vector<Eigen::Vector2d> & vias);
   bool checkCollisionOnTrajectory(double horizon_s) const;
   void publishVisualizations();
   void publishMapVisualization();
@@ -181,6 +184,24 @@ private:
   rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr cones_sub_;
   void onCones(const geometry_msgs::msg::PoseArray::SharedPtr msg);
   Eigen::Vector2d goal_in_frame_{0, 0};
+  // junsu 11-16 pass-through: the caller publishes [goal, next points...] on pass_through.topic just
+  // before the goal. Used once, by the goal whose position matches the first pose (a goal without a
+  // matching path - e.g. the runner's hold_here - clears them, so stops still stop). The spline then
+  // runs through the goal at speed and only comes to rest at the last point.
+  bool pass_through_{false};
+  std::string pass_topic_{"/goal_path"};
+  double pass_max_age_{1.0};
+  double max_stitch_lead_{0.35};                         // m, replan from the robot if the stitch point is farther ahead
+  double pass_radius_{0.6};                              // m, a passed point within this counts as passed
+  Eigen::Vector2d prev_goal_pos_{Eigen::Vector2d::Zero()}; // map frame: where the current leg started
+  bool has_pending_path_{false};
+  std::string pending_path_frame_;
+  std::vector<Eigen::Vector2d> pending_path_in_frame_;
+  rclcpp::Time pending_path_t_{0, 0, RCL_ROS_TIME};
+  std::vector<Eigen::Vector2d> vias_in_frame_;          // in goal_frame_, after the goal
+  rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr goal_path_sub_;
+  void onGoalPath(const nav_msgs::msg::Path::SharedPtr msg);
+  std::vector<Eigen::Vector2d> resolvedVias();
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   bool use_prior_map_{false};

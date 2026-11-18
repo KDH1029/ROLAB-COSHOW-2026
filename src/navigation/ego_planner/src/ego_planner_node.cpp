@@ -85,6 +85,14 @@ EgoPlannerNode::EgoPlannerNode()
   // hand-placed start offset and drift are followed.
   prior_frame_ = declare_parameter<std::string>("prior_map.frame", "");
   prior_period_s_ = declare_parameter<double>("prior_map.period_s", 1.0);
+  // junsu 11-16: pass through intermediate route points instead of stopping at every goal (header)
+  pass_through_ = declare_parameter<bool>("pass_through.enable", false);
+  pass_topic_ = declare_parameter<std::string>("pass_through.topic", "/goal_path");
+  pass_max_age_ = declare_parameter<double>("pass_through.max_age", 1.0);
+  // A spline through a corner cuts it, so the robot may never come within goal_tol of the point:
+  // an intermediate point also counts as passed once the robot crosses the corner bisector near it.
+  pass_radius_ = declare_parameter<double>("pass_through.pass_radius", 0.6);
+  max_stitch_lead_ = declare_parameter<double>("replan.max_stitch_lead", 0.35);
 
   // Runtime changes are accepted in any state; they take effect on the next plan.
   param_cb_ = add_on_set_parameters_callback(
@@ -146,6 +154,11 @@ CallbackReturn EgoPlannerNode::on_activate(const rclcpp_lifecycle::State &)
     odom_topic_, 10, std::bind(&EgoPlannerNode::onOdom, this, std::placeholders::_1));
   goal_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
     goal_topic_, 10, std::bind(&EgoPlannerNode::onGoal, this, std::placeholders::_1));
+  // Always listening (cheap); pass_through.enable decides whether the points are used (runtime switch)
+  goal_path_sub_ = create_subscription<nav_msgs::msg::Path>(
+    pass_topic_, 10, std::bind(&EgoPlannerNode::onGoalPath, this, std::placeholders::_1));
+  vias_in_frame_.clear();
+  has_pending_path_ = false;
   if (obstacle_source_ == "scan") {
     scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
       scan_topic_, rclcpp::SensorDataQoS(),
@@ -192,6 +205,9 @@ CallbackReturn EgoPlannerNode::on_deactivate(const rclcpp_lifecycle::State &)
   has_goal_ = false;
   odom_sub_.reset();
   goal_sub_.reset();
+  goal_path_sub_.reset();
+  vias_in_frame_.clear();
+  has_pending_path_ = false;
   scan_sub_.reset();
   cloud_sub_.reset();
   extra_sub_.reset();
@@ -279,6 +295,9 @@ rcl_interfaces::msg::SetParametersResult EgoPlannerNode::onParamChange(
       max_vy_ = p.as_double();
     } else if (n == "goal_tol") {
       goal_tol_ = p.as_double();
+    } else if (n == "pass_through.enable") {
+      pass_through_ = p.as_bool();
+      if (!pass_through_) vias_in_frame_.clear();
     } else {
       continue;  // others need a restart (grid size, inflation, topics)
     }
@@ -388,13 +407,23 @@ void EgoPlannerNode::onGoal(const geometry_msgs::msg::PoseStamped::SharedPtr msg
   }
   has_goal_ = true;
   state_ = PlannerState::PLANNING;
-  RCLCPP_INFO(get_logger(), "Received new target goal: (%.2f, %.2f) in %s -> (%.2f, %.2f) in %s",
+  prev_goal_pos_ = robot_pos_.head<2>();
+  // Points to pass through: only from a path published for this very goal (first pose = goal), once
+  vias_in_frame_.clear();
+  if (pass_through_ && has_pending_path_ && pending_path_frame_ == goal_frame_ && pending_path_in_frame_.size() > 1 &&
+      (now() - pending_path_t_).seconds() <= pass_max_age_ &&
+      (pending_path_in_frame_.front() - goal_in_frame_).norm() < 0.05) {
+    vias_in_frame_.assign(pending_path_in_frame_.begin() + 1, pending_path_in_frame_.end());
+  }
+  has_pending_path_ = false;
+  RCLCPP_INFO(get_logger(), "Received new target goal: (%.2f, %.2f) in %s -> (%.2f, %.2f) in %s%s",
               goal_in_frame_.x(), goal_in_frame_.y(), goal_frame_.empty() ? map_frame_.c_str() : goal_frame_.c_str(),
-              goal_pos_.x(), goal_pos_.y(), map_frame_.c_str());
+              goal_pos_.x(), goal_pos_.y(), map_frame_.c_str(),
+              vias_in_frame_.empty() ? "" : (" + " + std::to_string(vias_in_frame_.size()) + " pass-through").c_str());
 
   Eigen::Vector2d start_pos(robot_pos_.x(), robot_pos_.y());
   Eigen::Vector2d start_vel(robot_vel_.x(), robot_vel_.y());
-  if (planTrajectory(start_pos, start_vel, goal_pos_)) {
+  if (planTrajectory(start_pos, start_vel, goal_pos_, resolvedVias())) {
     state_ = PlannerState::EXECUTING;
     traj_start_time_ = now();
     last_replan_time_ = now();
@@ -405,39 +434,120 @@ void EgoPlannerNode::onGoal(const geometry_msgs::msg::PoseStamped::SharedPtr msg
   }
 }
 
+namespace
+{
+double polylineLength(const std::vector<Eigen::Vector2d> & p)
+{
+  double s = 0.0;
+  for (size_t i = 1; i < p.size(); ++i) s += (p[i] - p[i - 1]).norm();
+  return s;
+}
+
+// Pass-through: has point p passed route point `at` (reached from `from`, next is `next`)?
+// Within tol, or within radius and on the far side of the corner bisector.
+bool passedRoutePoint(const Eigen::Vector2d & p, const Eigen::Vector2d & from, const Eigen::Vector2d & at,
+                      const Eigen::Vector2d & next, double tol, double radius)
+{
+  const double d = (p - at).norm();
+  if (d <= tol) return true;
+  if (d > radius) return false;
+  const Eigen::Vector2d d_in = at - from, d_out = next - at;
+  if (d_in.norm() < 1e-3 || d_out.norm() < 1e-3) return false;
+  Eigen::Vector2d n = d_in.normalized() + d_out.normalized();
+  if (n.norm() < 1e-3) n = d_out.normalized();   // U-turn: past = moved toward the next point
+  return (p - at).dot(n.normalized()) >= 0.0;
+}
+
+// Keep the first `len` metres of a polyline (cut inside the last segment). True if it was cut.
+bool truncatePolyline(std::vector<Eigen::Vector2d> & p, double len)
+{
+  double s = 0.0;
+  for (size_t i = 1; i < p.size(); ++i) {
+    const double d = (p[i] - p[i - 1]).norm();
+    if (s + d >= len) {
+      const Eigen::Vector2d end = p[i - 1] + (p[i] - p[i - 1]) * ((len - s) / std::max(d, 1e-9));
+      p.resize(i);
+      p.push_back(end);
+      return true;
+    }
+    s += d;
+  }
+  return false;
+}
+}  // namespace
+
 bool EgoPlannerNode::planOn(
   const std::shared_ptr<GridMap> & map, const Eigen::Vector2d & p0, const Eigen::Vector2d & v0,
-  const Eigen::Vector2d & a0, const Eigen::Vector2d & goal, BsplineTrajectory & out) const
+  const Eigen::Vector2d & a0, const Eigen::Vector2d & goal, const std::vector<Eigen::Vector2d> & vias,
+  BsplineTrajectory & out) const
 {
-  // Clip distant goal to the local planning horizon
-  Eigen::Vector2d local_subgoal = goal;
-  if ((goal - p0).norm() > plan_horizon_) {
-    local_subgoal = p0 + (goal - p0).normalized() * plan_horizon_;
-  }
   AStar astar;
   BsplineOptimizer opt;
   configurePlanners(astar, opt, map);
-  std::vector<Eigen::Vector2d> a_star_path;
-  if (!astar.search(p0, local_subgoal, a_star_path)) {
-    return false;
-  }
-  BsplineTrajectory traj;
-  if (!opt.optimizeWithContinuity(a_star_path, p0, v0, a0, traj)) {
-    return false;
-  }
-  // The smoothed curve can cut corners into the inflated zone even when the A* path is free.
-  if (validate_traj_ && !opt.isCollisionFree(traj, 0.05)) {
-    return false;
-  }
-  out = std::move(traj);
-  return true;
+  auto attempt = [&](bool use_vias) -> bool {
+    // Clip distant goal to the local planning horizon
+    Eigen::Vector2d local_subgoal = goal;
+    const bool clipped = (goal - p0).norm() > plan_horizon_;
+    if (clipped) {
+      local_subgoal = p0 + (goal - p0).normalized() * plan_horizon_;
+    }
+    std::vector<Eigen::Vector2d> a_star_path;
+    if (!astar.search(p0, local_subgoal, a_star_path)) {
+      return false;
+    }
+    // Pass-through: continue the guide through the next points within the same horizon, so the
+    // spline's rest point (zero velocity) is the last of them, not this goal. A* may move a goal
+    // that sits in the inflation to a free cell nearby or stop short (partial); chain only from a
+    // path that really reached the point, and stop at the first point it cannot reach.
+    if (use_vias && !clipped && (a_star_path.back() - goal).norm() < 0.3) {
+      double left = plan_horizon_ - polylineLength(a_star_path);
+      for (const auto & v : vias) {
+        if (left < 0.1) break;
+        std::vector<Eigen::Vector2d> seg;
+        if (!astar.search(a_star_path.back(), v, seg) || seg.size() < 2 || (seg.back() - v).norm() >= 0.3) break;
+        const bool cut = truncatePolyline(seg, left);
+        left -= polylineLength(seg);
+        a_star_path.insert(a_star_path.end(), seg.begin() + 1, seg.end());
+        if (cut) break;
+      }
+    }
+    BsplineTrajectory traj;
+    if (!opt.optimizeWithContinuity(a_star_path, p0, v0, a0, traj)) {
+      return false;
+    }
+    // The smoothed curve can cut corners into the inflated zone even when the A* path is free.
+    if (validate_traj_ && !opt.isCollisionFree(traj, 0.05)) {
+      return false;
+    }
+    out = std::move(traj);
+    return true;
+  };
+  // A pass-through plan that fails falls back to the old stop-at-goal plan
+  return (!vias.empty() && attempt(true)) || attempt(false);
+}
+
+void EgoPlannerNode::onGoalPath(const nav_msgs::msg::Path::SharedPtr msg)
+{
+  pending_path_frame_ = msg->header.frame_id;
+  pending_path_in_frame_.clear();
+  for (const auto & p : msg->poses) pending_path_in_frame_.emplace_back(p.pose.position.x, p.pose.position.y);
+  pending_path_t_ = now();
+  has_pending_path_ = true;
+}
+
+std::vector<Eigen::Vector2d> EgoPlannerNode::resolvedVias()
+{
+  std::vector<Eigen::Vector2d> out;
+  if (!pass_through_ || vias_in_frame_.empty() || !toOdomFrame(goal_frame_, vias_in_frame_, out)) out.clear();
+  return out;
 }
 
 bool EgoPlannerNode::planTrajectory(const Eigen::Vector2d & start_pos,
                                    const Eigen::Vector2d & start_vel,
-                                   const Eigen::Vector2d & goal_pos)
+                                   const Eigen::Vector2d & goal_pos,
+                                   const std::vector<Eigen::Vector2d> & vias)
 {
-  if (!planOn(grid_map_, start_pos, start_vel, Eigen::Vector2d::Zero(), goal_pos, current_traj_)) {
+  if (!planOn(grid_map_, start_pos, start_vel, Eigen::Vector2d::Zero(), goal_pos, vias, current_traj_)) {
     RCLCPP_WARN(get_logger(), "No collision-free trajectory on the local grid");
     return false;
   }
@@ -448,11 +558,12 @@ bool EgoPlannerNode::asyncReplanWorker(const std::shared_ptr<GridMap> & map_snap
                                       const Eigen::Vector2d & p0,
                                       const Eigen::Vector2d & v0,
                                       const Eigen::Vector2d & a0,
-                                      const Eigen::Vector2d & goal)
+                                      const Eigen::Vector2d & goal,
+                                      const std::vector<Eigen::Vector2d> & vias)
 {
   if (!map_snapshot) return false;
   BsplineTrajectory traj;
-  if (!planOn(map_snapshot, p0, v0, a0, goal, traj)) {
+  if (!planOn(map_snapshot, p0, v0, a0, goal, vias, traj)) {
     return false;
   }
   std::lock_guard<std::mutex> lock(traj_mutex_);
@@ -494,7 +605,24 @@ void EgoPlannerNode::controlLoop()
     return;
   }
 
-  const double dist_to_goal = (robot_pos_.head<2>() - goal_pos_).norm();
+  double dist_to_goal = (robot_pos_.head<2>() - goal_pos_).norm();
+  // Pass-through: reaching an intermediate point is not a stop - the next one becomes the goal and
+  // the current spline (already planned through it) keeps running.
+  auto passed_intermediate = [&]() -> bool {
+    if (!pass_through_ || vias_in_frame_.empty()) return false;
+    const auto vias = resolvedVias();
+    if (vias.empty()) return dist_to_goal <= goal_tol_;
+    return passedRoutePoint(robot_pos_.head<2>(), prev_goal_pos_, goal_pos_, vias.front(), goal_tol_, pass_radius_);
+  };
+  while (passed_intermediate()) {
+    prev_goal_pos_ = goal_pos_;
+    goal_in_frame_ = vias_in_frame_.front();
+    vias_in_frame_.erase(vias_in_frame_.begin());
+    resolveGoal(goal_pos_);
+    dist_to_goal = (robot_pos_.head<2>() - goal_pos_).norm();
+    RCLCPP_INFO(get_logger(), "Passed a waypoint, next (%.2f, %.2f), %zu more", goal_pos_.x(), goal_pos_.y(),
+                vias_in_frame_.size());
+  }
   if (dist_to_goal <= goal_tol_) {
     RCLCPP_INFO(get_logger(), "Target goal reached! (distance: %.2f m)", dist_to_goal);
     stopRobot();
@@ -549,7 +677,10 @@ void EgoPlannerNode::controlLoop()
     Eigen::Vector2d p0 = current_traj_.evaluatePosition(t_stitch);
     Eigen::Vector2d v0 = current_traj_.evaluateVelocity(t_stitch);
     Eigen::Vector2d a0 = current_traj_.evaluateAcceleration(t_stitch);
-    if (t_cur > total_duration || v0.norm() < 0.02 || blocked_stop_) {
+    // A long (pass-through) trajectory lets the tracking lag build up: the stitch point can run
+    // a metre ahead of the robot, and planning from there cuts corners the robot never reaches.
+    if (t_cur > total_duration || v0.norm() < 0.02 || blocked_stop_ ||
+        (p0 - robot_pos_.head<2>()).norm() > max_stitch_lead_) {
       p0 = robot_pos_.head<2>();
       v0 = blocked_stop_ ? Eigen::Vector2d::Zero() : Eigen::Vector2d(robot_vel_.head<2>());
       a0.setZero();
@@ -559,10 +690,21 @@ void EgoPlannerNode::controlLoop()
     auto map_snapshot = grid_map_->clone();
     is_replanning_ = true;
     next_traj_start_time_ = stitch_wall_time;
+    Eigen::Vector2d plan_goal = goal_pos_;
+    std::vector<Eigen::Vector2d> plan_vias = resolvedVias();
+    {
+      Eigen::Vector2d from = prev_goal_pos_;
+      while (!plan_vias.empty() &&
+             passedRoutePoint(p0, from, plan_goal, plan_vias.front(), goal_tol_, pass_radius_)) {
+        from = plan_goal;
+        plan_goal = plan_vias.front();
+        plan_vias.erase(plan_vias.begin());
+      }
+    }
     async_plan_future_ = std::async(
       std::launch::async,
-      [this, map_snapshot, p0, v0, a0, goal = goal_pos_]() {
-        return asyncReplanWorker(map_snapshot, p0, v0, a0, goal);
+      [this, map_snapshot, p0, v0, a0, goal = plan_goal, vias = plan_vias]() {
+        return asyncReplanWorker(map_snapshot, p0, v0, a0, goal, vias);
       });
   }
 
