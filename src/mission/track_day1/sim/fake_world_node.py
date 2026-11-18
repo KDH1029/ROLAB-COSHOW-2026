@@ -3,7 +3,9 @@
 
   /api/sport/request  -> Move / StopMove / BalanceStand / ClassicWalk (answers /api/sport/response)
   /utlidar/robot_odom <- built-in odometry that under-reads distance (x 1/1.189) like the real one
-  /track/edges        <- rendered D435 frames through band_vision_core (same JSON as the internal PC node)
+  /track/edges        <- rendered D435 frames through band_vision_core (same JSON as the internal PC node)  [mode vision]
+  /lidar_points       <- XT16-like rays on the floor, the 0.6 m wall (9.00 x 7.01 m) and the other robot  [mode wall]
+  /Odometry           <- FAST-LIO-like pose (own origin, small noise and yaw drift)                          [mode wall]
   /mission/traffic_light_state <- RED until t_green, then GREEN
   truth: foot margin to the lane lines, lap time (green -> rear feet over the start line), printed at the end
 """
@@ -16,6 +18,8 @@ import time
 
 import numpy as np
 import rclpy
+from sensor_msgs.msg import PointCloud2
+from sensor_msgs_py import point_cloud2 as pc2
 from rcl_interfaces.msg import ParameterDescriptor
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
@@ -29,6 +33,8 @@ sys.path.insert(0, HERE)
 import band_vision_core as BV  # noqa: E402
 import floor_world as W  # noqa: E402
 import track_spec as T  # noqa: E402
+import track_path as TP  # noqa: E402
+import wall_align as WA  # noqa: E402
 from sim_day1 import FEET, FOOT_R, BAND, pose_at_s, track_s  # noqa: E402
 
 
@@ -44,6 +50,11 @@ class FakeWorld(Node):
         s0 = float(p('s0', 0.4).value)
         self.latency = float(p('latency', 0.12).value)
         self.drift = float(p('drift', 0.012).value)
+        self.mode = str(p('mode', 'wall').value)
+        self.other = bool(p('other', True).value)            # a second robot in the other lane
+        self.wall_dims = (9.00, 7.01)                        # measured 11-18 (nominal 9.00 x 7.00)
+        self.lio0 = (-0.8, 1.6, 2.0)                         # FAST-LIO origin: wherever it started
+        self.lio_yaw_drift = math.radians(float(p('lio_yaw_drift_dps', 0.03).value))
         self.R = T.R_CENTER[self.lane]
         self.lap = T.LAP_LEN[self.lane]
         self.x, self.y, self.yaw = pose_at_s(s0 - 0.30, self.R, off0)
@@ -75,13 +86,71 @@ class FakeWorld(Node):
         self.pub_odom = self.create_publisher(Odometry, '/utlidar/robot_odom', 20)
         self.pub_edges = self.create_publisher(String, '/track/edges', QoSProfile(
             depth=5, reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST))
+        self.pub_lio = self.create_publisher(Odometry, '/Odometry', 20)
+        self.pub_cloud = self.create_publisher(PointCloud2, '/lidar_points', 5)
         self.pub_light = self.create_publisher(String, '/mission/traffic_light_state', 10)
         self.create_subscription(String, '/track/status', self.cb_status, 5)
         self.runner_state = ''
         self.create_timer(0.02, self.step)
         self.create_timer(0.1, self.light)
-        threading.Thread(target=self.camera_loop, daemon=True).start()
-        self.get_logger().info('fake world: lane %d, green at %.1f s' % (self.lane, self.t_green))
+        if self.mode == 'vision':
+            threading.Thread(target=self.camera_loop, daemon=True).start()
+        else:
+            el = np.radians(np.arange(-15.0, 15.01, 2.0))
+            az = np.radians(np.arange(0.0, 360.0, 1.0))
+            E, A = np.meshgrid(el, az, indexing='ij')
+            self.rays_l = np.column_stack([(np.cos(E) * np.cos(A)).ravel(), (np.cos(E) * np.sin(A)).ravel(), np.sin(E).ravel()])
+            threading.Thread(target=self.lidar_loop, daemon=True).start()
+        self.get_logger().info('fake world: lane %d, mode %s, other robot %s, green at %.1f s'
+                               % (self.lane, self.mode, self.other, self.t_green))
+
+    def other_pose(self, t):
+        lane = 1 if self.lane == 2 else 2
+        return TP.pose_at(lane, 3.0 + 0.5 * t)
+
+    def lidar_loop(self):
+        h_base = 0.31
+        while rclpy.ok():
+            t0 = time.time()
+            with self.lock:
+                x, y, yaw = self.x, self.y, self.yaw
+            c, s = math.cos(yaw), math.sin(yaw)
+            D = self.rays_l @ WA.R_LIDAR.T                   # base frame directions
+            o = WA.T_LIDAR
+            ox, oy, oz = x + c * o[0] - s * o[1], y + s * o[0] + c * o[1], h_base + o[2]
+            dx, dy, dz = c * D[:, 0] - s * D[:, 1], s * D[:, 0] + c * D[:, 1], D[:, 2]
+            best = np.full(len(D), np.inf)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                tf = np.where(dz < -1e-6, -oz / dz, np.inf)
+                best = np.minimum(best, tf)
+                for ax, half in ((0, self.wall_dims[0] / 2), (1, self.wall_dims[1] / 2)):
+                    oo, dd = (ox, dx) if ax == 0 else (oy, dy)
+                    for sg in (-1, 1):
+                        tw = (sg * half - oo) / dd
+                        zh = oz + tw * dz
+                        ok = (tw > 0) & (zh >= 0) & (zh <= T.WALL_H)
+                        best = np.where(ok & (tw < best), tw, best)
+                if self.other:
+                    qx, qy, _ = self.other_pose(t0 - self.t0)
+                    fx, fy = ox - qx, oy - qy
+                    a = dx * dx + dy * dy
+                    b = 2 * (fx * dx + fy * dy)
+                    cc = fx * fx + fy * fy - 0.22 ** 2
+                    disc = b * b - 4 * a * cc
+                    tc = np.where(disc > 0, (-b - np.sqrt(np.maximum(disc, 0))) / (2 * a), np.inf)
+                    zh = oz + tc * dz
+                    ok = (tc > 0) & (zh >= 0) & (zh <= 0.45)
+                    best = np.where(ok & (tc < best), tc, best)
+            keep = np.isfinite(best) & (best > 0.3) & (best < 15.0)
+            r = best[keep] + self.rng.normal(0, 0.01, keep.sum())
+            P = self.rays_l[keep] * r[:, None]                # lidar frame
+            hdr = Odometry().header
+            hdr.stamp = self.get_clock().now().to_msg()
+            hdr.frame_id = 'hesai_lidar'
+            self.pub_cloud.publish(pc2.create_cloud_xyz32(hdr, P.astype(np.float32)))
+            rest = 0.1 - (time.time() - t0)
+            if rest > 0:
+                time.sleep(rest)
 
     def cb_status(self, m):
         try:
@@ -166,6 +235,17 @@ class FakeWorld(Node):
         o.twist.twist.linear.x = self.va[0] / 1.189
         o.twist.twist.angular.z = self.va[2]
         self.pub_odom.publish(o)
+        if self.mode == 'wall':
+            t = time.time() - self.t0
+            lio0 = (self.lio0[0], self.lio0[1], self.lio0[2] + self.lio_yaw_drift * t)
+            px, py, pyaw = TP.compose(lio0, (self.x + self.rng.normal(0, 0.004), self.y + self.rng.normal(0, 0.004), self.yaw))
+            q = Odometry()
+            q.header.stamp = o.header.stamp
+            q.header.frame_id = 'camera_init'
+            q.child_frame_id = 'body'
+            q.pose.pose.position.x, q.pose.pose.position.y = px, py
+            q.pose.pose.orientation.z, q.pose.pose.orientation.w = math.sin(pyaw / 2), math.cos(pyaw / 2)
+            self.pub_lio.publish(q)
 
     def camera_loop(self):
         while rclpy.ok():

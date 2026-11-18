@@ -45,8 +45,8 @@ def min_avg_speed(lane, extra=1.0, limit_s=60.0, start_delay=1.5):
 # Track frame: origin = track centre, x = long axis (straights parallel to x), z up; counter-clockwise travel.
 WALL_GAP = 0.495
 WALL_H = 0.60
-WALL_LX = 2 * (STRAIGHT / 2 + R_OUTER) + 2 * WALL_GAP     # 8.61 m, inner face to inner face
-WALL_LY = 2 * R_OUTER + 2 * WALL_GAP                       # 6.61 m
+WALL_LX = 2 * (STRAIGHT / 2 + R_OUTER) + 2 * WALL_GAP     # 9.00 m, inner face to inner face
+WALL_LY = 2 * R_OUTER + 2 * WALL_GAP                       # 7.00 m
 
 
 def lane_frame(lane, x, y):

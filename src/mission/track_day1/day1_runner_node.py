@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Day-1 track race runner (NUC, ROS 2 Jazzy). Run it in your own terminal: space / x = emergency stop.
 
-  camera edges (/track/edges, internal PC) --TF odom<-base_link at capture--> LanePath (odom frame)
-  --> nav_msgs/Path --> Nav2 controller_server FollowPath (Regulated Pure Pursuit) --> /cmd_vel --> go2 bridge
+mode wall (default): no camera, no map.
+  XT16 /lidar_points while standing --wall_align (0.6 m rectangular wall)--> robot pose in the track frame
+  + odom TF (FAST-LIO /Odometry via odom_tf) at that moment = track <- odom, fixed for the run
+  rulebook lane centre (track_path) --> odom frame --> nav_msgs/Path --> Nav2 FollowPath (RPP) --> /cmd_vel --> bridge
+mode vision (spare): camera edges (/track/edges, internal PC) --> LanePath (odom frame) --> the same Nav2 / bridge.
 
 States
   GAIT   BalanceStand -> ClassicWalk {"data": true}, wait for code 0 (the yaw trim is measured for ClassicWalk)
-  LOCK   pool `init_frames` edge frames while standing, find where the lane is (+-0.35 m, +-12 deg)
-  WAIT   keep refining the path; GREEN continuously for `green_s` and no RED within 1 s
-  RUN    send the path to FollowPath (re-sent as it grows); lap distance from the odom TF
-  FINISH path cut at one lap + extra; Nav2 stops at its end
+  LOCK   wall: `lock_n` steady wall poses, lane and placement checked (+-max_lat, +-max_head)
+         vision: pool `init_frames` edge frames, find where the lane is (+-0.35 m, +-12 deg)
+  WAIT   GREEN continuously for `green_s` and no RED within 1 s
+  RUN    send the path to FollowPath (re-sent every 0.2 s from the robot onwards); lap = station along the lane
+  FINISH path ends at one lap + extra; Nav2 stops at its end
   STOP   emergency (key), goal cancelled, bridge deactivated, StopMove
 """
 import json
@@ -36,8 +40,10 @@ from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, qos_profile_sensor_data
 from rclpy.time import Time
+from sensor_msgs.msg import PointCloud2
+from sensor_msgs_py import point_cloud2 as pc2
 from std_msgs.msg import Bool, String
 from tf2_ros import Buffer, TransformListener
 from unitree_api.msg import Request, Response
@@ -45,7 +51,9 @@ from unitree_api.msg import Request, Response
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import day1_logic as DL  # noqa: E402
 import lane_path as LP  # noqa: E402
+import track_path as TP  # noqa: E402
 import track_spec as T  # noqa: E402
+import wall_align as WA  # noqa: E402
 
 API_BALANCESTAND = 1002
 API_STOPMOVE = 1003
@@ -62,6 +70,7 @@ class Day1Runner(Node):
         def p(name, default):   # numbers typed as 1 or 1.0 both work
             return self.declare_parameter(name, default, ParameterDescriptor(dynamic_typing=True))
         self.lane = int(p('lane', 2).value)
+        self.mode = str(p('mode', 'wall').value)               # wall | vision
         self.v = float(p('v', 0.5).value)
         self.extra = float(p('extra', 1.2).value)
         self.light = str(p('light', 'model').value)          # model | none (test only)
@@ -75,10 +84,21 @@ class Day1Runner(Node):
         self.bridge = str(p('bridge_node', '/go2_cmd_vel_to_sport').value)
         self.keys = bool(p('keys', True).value)
         self.coast_s = float(p('coast_s', 1.0).value)        # lane unseen this long: stop growing the path
+        self.lidar_topic = str(p('lidar_topic', '/lidar_points').value)
+        self.lock_n = int(p('lock_n', 5).value)
+        self.max_lat = float(p('max_lat', 0.35).value)       # m from the lane centre at the start
+        self.max_head = float(p('max_head', 15.0).value)     # deg
+        self.blend_m = float(p('blend_m', 2.0).value)        # ease from the start offset onto the centre
+        if self.mode not in ('wall', 'vision'):
+            raise SystemExit('mode must be wall or vision')
 
         self.tf = Buffer(cache_time=Duration(seconds=5.0))
         self.tfl = TransformListener(self.tf, self)
-        self.path = LP.LanePath(self.lane)
+        self.path = LP.LanePath(self.lane)          # vision mode
+        self.wlock = TP.StartLock(self.lane, n=self.lock_n, max_lat=self.max_lat, max_head_deg=self.max_head)
+        self.plan = self.prog = self.T_to = self.T_ot = None   # wall mode: plan in the track frame, track <- odom
+        self.sub_lidar = None
+        self.lock_t0 = None
         self.gate = DL.LightGate(need_s=self.green_s)
         self.lap = DL.LapEnd(self.lane, extra=self.extra)
         self.state = 'GAIT' if self.gait else 'LOCK'
@@ -98,7 +118,8 @@ class Day1Runner(Node):
         self.lock = threading.Lock()
 
         q_be = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST)
-        self.create_subscription(String, self.edges_topic, self.cb_edges, q_be)
+        if self.mode == 'vision':
+            self.create_subscription(String, self.edges_topic, self.cb_edges, q_be)
         self.create_subscription(String, '/mission/traffic_light_state', self.cb_light, 10)
         self.create_subscription(Response, '/api/sport/response', self.cb_resp, 10)
         self.pub_req = self.create_publisher(Request, '/api/sport/request', 10)
@@ -113,9 +134,11 @@ class Day1Runner(Node):
 
         ok, msg = DL.speed_check(self.lane, self.v, self.extra)
         self.get_logger().info(('' if ok else '★ ') + msg)
-        self.get_logger().info('lane %d · v %.2f · light %s · gait %s — space/x = STOP, q = quit'
-                               % (self.lane, self.v, self.light, self.gait))
+        self.get_logger().info('lane %d · v %.2f · mode %s · light %s · gait %s — space/x = STOP, q = quit'
+                               % (self.lane, self.v, self.mode, self.light, self.gait))
         self.set_rpp_speed(self.v)
+        if self.state == 'LOCK':
+            self.start_lock()
 
     # ------------------------------------------------------------------ helpers
     def now_s(self):
@@ -171,9 +194,57 @@ class Day1Runner(Node):
             if m.header.status.code == 0:
                 self.get_logger().info('ClassicWalk OK')
                 self.state = 'LOCK'
+                self.start_lock()
             else:
                 self.get_logger().warn('ClassicWalk refused (code %d) — BalanceStand again' % m.header.status.code)
                 self.gait_step = 0
+
+    def start_lock(self):
+        self.lock_t0 = self.now_s()
+        if self.mode == 'wall' and self.sub_lidar is None:
+            # only while standing: a 32k-point cloud at 20 Hz is too much for Python while driving
+            self.sub_lidar = self.create_subscription(PointCloud2, self.lidar_topic, self.cb_lidar, qos_profile_sensor_data)
+            self.get_logger().info('wall lock: listening to %s' % self.lidar_topic)
+
+    def cb_lidar(self, m):
+        if self.state != 'LOCK' or self.plan is not None:
+            return
+        self.n_frames += 1
+        if self.n_frames % 2:          # 10 Hz is plenty, and wall_align takes ~60 ms
+            return
+        pose = self.pose_at(None)      # standing still: the latest odom pose is the pose of the scan
+        if pose is None:
+            self.get_logger().warn('wall lock: no odom TF (%s -> %s)' % (self.odom_frame, self.base_frame),
+                                   throttle_duration_sec=2.0)
+            return
+        P = pc2.read_points_numpy(m, field_names=('x', 'y', 'z'), skip_nans=True).astype(np.float64)
+        r = WA.align([WA.lidar_to_base(P)], seed=self.n_frames)
+        if r.get('ok'):
+            self.n_ok += 1
+        res = self.wlock.feed(r, pose)
+        if res is None:
+            self.get_logger().info('wall lock: ' + self.wlock.why, throttle_duration_sec=1.0)
+            return
+        with self.lock:
+            self.T_to = res['T_track_odom']
+            self.T_ot = TP.inverse(self.T_to)
+            self.plan = TP.LanePlan(self.lane, res['s'], res['lateral'], extra=self.extra, blend_m=self.blend_m)
+            self.prog = TP.Progress(self.lane, res['s'])
+            self.lock_res = res
+            self.state = 'WAIT'
+        self.get_logger().info('start found: lane %d, station %.2f m, lateral %+.3f m, heading %+.1f deg '
+                               '(walls %d, dims %.2f x %.2f, rms %.3f) — path %.1f m'
+                               % (self.lane, res['s'], res['lateral'], math.degrees(res['heading_err']),
+                                  r['walls_seen'], r['dims'][0], r['dims'][1], r['rms'],
+                                  self.plan.s_end - self.plan.s_start))
+        self.destroy_subscription(self.sub_lidar)
+        self.sub_lidar = None
+        self.pub_cam.publish(Bool(data=True))
+        self.bridge_state(True)
+        self.set_rpp_speed(self.v)
+
+    def track_pose(self, cur):
+        return TP.compose(self.T_to, cur)
 
     def cb_edges(self, m):
         recv = self.now_s()
@@ -245,6 +316,9 @@ class Day1Runner(Node):
         cur = self.pose_at(None)
         if cur is None:
             return
+        if self.mode == 'wall':
+            self.tick_wall(t, cur)
+            return
         with self.lock:
             if self.path.pts is not None:
                 fresh = self.last_edge_t is not None and t - self.last_edge_t < self.coast_s
@@ -273,6 +347,33 @@ class Day1Runner(Node):
             self.last_goal_t = t
         if self.state == 'FINISH' and (t - self.last_goal_t > 0.2) and not self.goal_busy and self.goal_handle is None:
             self.send_goal(msg)        # final, truncated path: RPP stops at its end
+            self.last_goal_t = t
+
+    def tick_wall(self, t, cur):
+        with self.lock:
+            if self.plan is None:
+                return
+            tp = self.track_pose(cur)
+            if self.state == 'WAIT':
+                s_r = self.plan.s_start
+                go = self.gate.go(t) if self.light != 'none' else True
+                if go:
+                    self.state, self.t_go = 'RUN', t
+                    self.pub_cam.publish(Bool(data=False))
+                    self.get_logger().info('GREEN — go')
+            elif self.state in ('RUN', 'FINISH'):
+                s_r = self.prog.feed(tp[0], tp[1])
+                if self.state == 'RUN' and self.plan.s_end - s_r < 0.25:
+                    self.state = 'FINISH'
+                    self.get_logger().info('lap done: %.2f m along the lane in %.1f s'
+                                           % (s_r - self.plan.s_start, t - self.t_go))
+            else:
+                s_r = self.prog.s
+            pts = TP.apply(self.T_ot, self.plan.points(s_r - 0.3))
+        msg = self.make_path(pts)
+        self.pub_path.publish(msg)
+        if self.state == 'RUN' and (t - self.last_goal_t > 0.2) and not self.goal_busy:
+            self.send_goal(msg)
             self.last_goal_t = t
 
     def make_path(self, pts):
@@ -330,6 +431,20 @@ class Day1Runner(Node):
 
     def report(self):
         cur = self.pose_at(None)
+        if self.mode == 'wall':
+            if self.state == 'LOCK' and self.plan is None and self.lock_t0 is not None and self.now_s() - self.lock_t0 > 5.0:
+                self.get_logger().warn('★ no start yet after %.0f s: %s' % (self.now_s() - self.lock_t0, self.wlock.why),
+                                       throttle_duration_sec=5.0)
+            lat, s_done = '-', 0.0
+            if cur is not None and self.plan is not None:
+                tp = self.track_pose(cur)
+                lat = '%+.3f' % T.lane_frame(self.lane, tp[0], tp[1])[0]
+                s_done = self.prog.s - self.plan.s_start
+            total = (self.plan.s_end - self.plan.s_start) if self.plan else 0.0
+            self.get_logger().info('%s | lateral %s m · lap %.1f/%.1f m · scans %d ok %d · light %s'
+                                   % (self.state, lat, s_done, total, self.n_frames // 2, self.n_ok, self.light_state))
+            self.pub_status.publish(String(data=json.dumps(dict(state=self.state, off=lat, lap=s_done))))
+            return
         off = '-'
         if cur is not None and self.path.pts is not None:
             off = '%+.3f' % self.path.robot_station(cur[0], cur[1])[1]

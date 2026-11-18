@@ -18,21 +18,6 @@ from sensor_msgs_py import point_cloud2 as pc2
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import wall_align as W   # noqa: E402
 
-# go2_bridge bridge_params.yaml: hesai_lidar in base_link
-EXT = dict(x=0.25, y=0.0, z=0.1588, roll=0.012330, pitch=0.005579, yaw=1.57079632679)
-
-
-def rot(r, p, y):
-    cr, sr, cp, sp, cy, sy = math.cos(r), math.sin(r), math.cos(p), math.sin(p), math.cos(y), math.sin(y)
-    return np.array([[cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
-                     [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
-                     [-sp, cp * sr, cp * cr]])
-
-
-R_EXT = rot(EXT['roll'], EXT['pitch'], EXT['yaw'])
-T_EXT = np.array([EXT['x'], EXT['y'], EXT['z']])
-
-
 def frames(bag, topic='/lidar_points'):
     r = rosbag2_py.SequentialReader()
     r.open(rosbag2_py.StorageOptions(uri=bag, storage_id='mcap'), rosbag2_py.ConverterOptions('', ''))
@@ -41,7 +26,7 @@ def frames(bag, topic='/lidar_points'):
         _, data, t = r.read_next()
         m = deserialize_message(data, PointCloud2)
         P = pc2.read_points_numpy(m, field_names=('x', 'y', 'z'), skip_nans=True).astype(float)
-        yield t * 1e-9, P @ R_EXT.T + T_EXT
+        yield t * 1e-9, W.lidar_to_base(P)
 
 
 def main():

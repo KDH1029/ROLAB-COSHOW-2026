@@ -43,6 +43,26 @@ DEFAULTS = dict(
 )
 
 
+# XT16 in base_link (go2_bridge bridge_params.yaml, same numbers as FAST-LIO extrinsic)
+LIDAR_EXT = dict(x=0.25, y=0.0, z=0.1588, roll=0.012330, pitch=0.005579, yaw=1.57079632679)
+
+
+def _rpy(r, p, y):
+    cr, sr, cp, sp, cy, sy = math.cos(r), math.sin(r), math.cos(p), math.sin(p), math.cos(y), math.sin(y)
+    return np.array([[cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+                     [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+                     [-sp, cp * sr, cp * cr]])
+
+
+R_LIDAR = _rpy(LIDAR_EXT['roll'], LIDAR_EXT['pitch'], LIDAR_EXT['yaw'])
+T_LIDAR = np.array([LIDAR_EXT['x'], LIDAR_EXT['y'], LIDAR_EXT['z']])
+
+
+def lidar_to_base(P):
+    """(N, 3) XT16 points (hesai_lidar frame, /lidar_points) -> base_link."""
+    return np.asarray(P, float)[:, :3] @ R_LIDAR.T + T_LIDAR
+
+
 def fit_floor(P, cfg, rng):
     """RANSAC plane on low points. Returns (n, d) with n.z > 0, height = P @ n + d."""
     lo = P[(P[:, 2] > cfg['floor_z_range'][0]) & (P[:, 2] < cfg['floor_z_range'][1])]
