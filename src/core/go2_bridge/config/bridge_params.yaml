@@ -1,0 +1,90 @@
+# Go2 Bridge Node Parameters (src/core/go2_bridge/config/bridge_params.yaml)
+
+go2_odom_tf:
+  ros__parameters:
+    odom_topic: "/utlidar/robot_odom"
+    dst_parent: "odom"
+    dst_child: "base_link"
+    z_lift: 0.0
+    stamp_mode: "align"
+    max_rate: 50.0
+
+go2_imu_bridge:
+  ros__parameters:
+    input_topic: "/lowstate"
+    output_topic: "/imu/body"
+    frame_id: "imu_link"
+    publish_static_tf: true
+    publish_stab: true
+    stab_parent: "base_link"
+    stab_child: "base_stab"
+    stab_rate: 50.0
+
+    # Hesai XT16 mounting extrinsics relative to base_link (m, rad)
+    lidar_x: 0.2500
+    lidar_y: 0.0000
+    lidar_z: 0.1588
+    lidar_roll: 0.012330
+    lidar_pitch: 0.005579
+    lidar_yaw: 1.57079632679
+
+    # Attitude stabilization & slope adaptation
+    stab_mode: "gravity"
+    # Kinematic (foot-plane) attitude filter for base_stab: OFF. On the 10-30 bag it made base_stab
+    # 2.5x jumpier than the IMU (trot: only 2 diagonal feet down) and 2.6 deg off gravity (median,
+    # 6 deg = the clamp at p90); AMCL replay on/off equal within run-to-run spread (median 8.3/7.0 cm,
+    # p90 16.1/14.9 cm, 0 s > 0.5 m both). Kept switchable for terrain work after the competition.
+    use_kinematics_filter: false
+    filter_alpha: 0.96
+    contact_force_thresh: 15
+    max_kin_imu_diff_deg: 6.0
+
+go2_cloud_bridge:
+  ros__parameters:
+    input_topic: "/lidar_points"
+    output_topic: "/velodyne_points"
+    frame_id: "hesai_lidar"
+    stride: 1
+    publish_terrain_scan: true
+    scan_topic: "/scan"
+    target_frame: "base_stab"
+    min_range: 0.40
+    max_range: 15.0
+    enable_slope_filter: true
+    max_walkable_slope_deg: 18.0
+    obstacle_min_dz: 0.10
+    obstacle_max_dz: 1.20
+    radial_bin_m: 0.35
+    azimuth_bins: 360
+    # "vertical": walls = adjacent rings at the same horizontal distance (ramps/stairs never qualify).
+    # "slope": original radial ground profile. AMCL on the 누리관 bag: vertical p90 15 cm vs slope 18 cm.
+    scan_mode: "vertical"
+    vertical_tol_m: 0.03
+    vertical_min_rings: 3
+    vertical_min_span_m: 0.08
+
+go2_cmd_vel_to_sport:
+  ros__parameters:
+    cmd_vel_topic: "/cmd_vel"
+    sport_req_topic: "/api/sport/request"
+    max_vx: 0.8
+    max_vy: 0.4
+    max_wz: 1.5
+    min_vx: 0.08
+    min_vy: 0.08
+    min_wz: 0.15
+    # Straight-walk yaw trim: wz_out = wz - (yaw_trim_per_vx * vx + yaw_trim_bias) while walking.
+    # vx here is the COMMANDED speed (commanded > actual). 11-04 live test (go2_yaw_drift.py live):
+    # 0.144/-0.004 (fit on actual speed from the 113612 bag) over-corrected ~-2 deg/m at cmd 0.3 and 0.5;
+    # refit on commanded vx -> 0.110/-0.002, check at cmd 0.5: +0.06 deg/s (+0.1 deg/m).
+    # Not re-tested at cmd 0.3 with these values. Reverse (vx < 0) uses the mirrored trim - unverified.
+    # The remote does not go through this bridge. 0 / 0 = off.
+    # Check: go2_yaw_drift.py live --vx 0.3 / 0.5 / -0.3 --trim 0.110,-0.002 (residual vs the commanded vx,
+    # OK within 1 deg/m). Its bag mode still fits the actual speed - do not take those numbers as the trim.
+    # CO SHOW: 11-05 ClassicWalk re-measure (commanded vx): 0.0156 / +0.0397 -> -0.06 deg/m left at 0.4 m/s.
+    # The 0.110/-0.002 above was for the default gait and over-corrects +4.3 deg/m at 0.25 m/s in ClassicWalk.
+    yaw_trim_per_vx: 0.0156
+    yaw_trim_bias: 0.0397
+    max_ax: 1.0
+    max_alphaz: 2.0
+    deadman_s: 0.5

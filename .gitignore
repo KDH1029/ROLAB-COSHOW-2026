@@ -28,3 +28,6 @@ venv/
 *.engine
 *.tar.gz
 *.zip
+
+# run logs
+logs/
