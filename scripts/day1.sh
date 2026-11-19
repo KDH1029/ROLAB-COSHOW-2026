@@ -19,6 +19,8 @@
 #   day1.sh vision snap   camera + bird's-eye check images -> logs/snap/
 #   day1.sh xt16          start the XT16 driver if it is not running, show /lidar_points rate (20 Hz expected)
 #   day1.sh light         start the YOLO traffic-light node (~/junsu_vision on the internal PC)
+#   day1.sh hoop push|build|start|stop|status   hula-hoop vision on the internal PC (push the model, build the TRT
+#                         engine once with the robot lying down, start the node; it looks only at the look point)
 #   day1.sh lightcheck [s] watch the real light for s seconds the way the runner does (robot does not move)
 #   day1.sh status        rates of the topics that matter
 #   day1.sh run in|out [v=0.5] [gait=classic|freewalk|trotrun|static|economic] [lookahead=0.8] [light=none] [extra=1.2] [track_dx=0 track_dy=0 track_dyaw_deg=0] [path_file=pins.csv]
@@ -136,6 +138,14 @@ case "${1:-}" in
     else echo "XT16 driver already running"; fi
     timeout 6 ros2 topic hz /lidar_points --window 20 2>/dev/null | grep -m1 average || echo "★ no /lidar_points — restart: pkill -INT -x hesai_ros_drive; day1.sh xt16";;
   light) "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh start';;
+  hoop)   # hula-hoop vision on the internal PC: day1.sh hoop push|build|start|stop|status
+    case "${2:-status}" in
+      push) bash "$ROOT/src/vision/start_light/deploy_onboard_vision.sh" push;;
+      build) echo "★ 로봇을 엎드려 둔 채로 (내부 PC 가 로봇 펌웨어 PC)"; "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh hoop-build';;
+      start|stop) "${SSH[@]}" $ROBOT "bash ~/junsu_vision/jetson_vision.sh hoop-${2}";;
+      status) "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh status';;
+      *) echo "hoop push|build|start|stop|status";;
+    esac;;
   teach)   # drive one lap with the remote, the lap is saved as a route (nothing goes to the motors)
     env_ros; shift
     A=(); for kv in "$@"; do case $kv in in|out) A+=(-p "lane:=$kv");; *=*) A+=(-p "${kv%%=*}:=${kv#*=}");; esac; done
