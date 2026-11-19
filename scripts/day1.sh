@@ -11,6 +11,7 @@
 #                         branch through that colour (keys 1 / 2 pick by hand while looking)
 #   day1.sh routes        list taught routes
 #   day1.sh edit R        edit route R on the map (drag pins; s saves, old file kept as .bak_HHMMSS)
+#   day1.sh sync R1 R2    after editing R1: its shared stretches (as they were before the edit) -> R2
 #   day1.sh bench         table of logs/day1/bench.csv (one line per finished run: gait, v, lap time, lateral, roll/pitch)
 #   day1.sh vision push   copy the camera edge node to the internal PC (~/coshow_track)
 #   day1.sh vision start  camera (if not running) + edge node on the internal PC
@@ -127,9 +128,13 @@ case "${1:-}" in
     A=(); for kv in "$@"; do case $kv in in|out) A+=(-p "lane:=$kv");; *=*) A+=(-p "${kv%%=*}:=${kv#*=}");; esac; done
     python3 "$TD/day1_teach_node.py" --ros-args "${A[@]}" 2>&1 | tee "$LOG/teach_$(date +%H%M%S).log";;
   routes) ls -t "$LOG/routes/"*.csv 2>/dev/null | grep -v -e _raw -e '\.bak_' || echo "no routes yet";;
-  edit)   # route editor on the map: day1.sh edit <route> [map=maps/coshow_1119]
+  edit)   # route editor on the map: day1.sh edit <route> [map=maps/coshow_1119]   (window stays until closed)
     f=$LOG/routes/${2:?route name}.csv; [ -f "$f" ] || { echo "★ no $f (day1.sh routes)"; exit 1; }
-    python3 "$ROOT/scripts/route_edit.py" "$f" "${@:3}";;
+    export DISPLAY=${DISPLAY:-:0}
+    setsid nohup python3 "$ROOT/scripts/route_edit.py" "$f" "${@:3}" > "$LOG/route_edit_$2.log" 2>&1 < /dev/null &
+    sleep 3; tail -1 "$LOG/route_edit_$2.log";;
+  sync)   # day1.sh sync <edited> <other>: shared stretches of the edited route -> the other route
+    python3 "$ROOT/scripts/route_sync.py" "$LOG/routes/${2:?edited route}.csv" "$LOG/routes/${3:?other route}.csv";;
   bench) python3 "$TD/tools/bench_table.py" "${2:-$LOG/bench.csv}";;
   lightcheck)   # robot does not move: camera on, watch the real light for N s (default 20), camera off
     env_ros; python3 "$ROOT/src/vision/start_light/check_tl_live.py" "${2:-20}";;

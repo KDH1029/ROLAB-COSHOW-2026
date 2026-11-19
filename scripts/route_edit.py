@@ -16,6 +16,7 @@ Keys    u  undo      s  save (old file kept as .bak_HHMMSS)      q  quit (asks n
         r  re-space the pins evenly (0.5 m)     v  show / hide the recorded drive      h  this help
 Korean keyboard layout works too (ㄴ = s, ㅕ = u, ...).
 """
+import math
 import os
 import shutil
 import sys
@@ -117,6 +118,17 @@ def main():
         import json
         from matplotlib.patches import Rectangle
         for z in json.load(open(zf)):
+            if z.get('type') == 'look':     # hula-hoop look point: where it stops and which way it faces
+                lx, ly = z['at']
+                a_ = math.radians(z.get('yaw_deg', 0.0))
+                ax.plot(lx, ly, 'D', ms=11, mfc='#f1c40f', mec='k', zorder=7)
+                ax.annotate('', xy=(lx + 0.6 * math.cos(a_), ly + 0.6 * math.sin(a_)), xytext=(lx, ly),
+                            arrowprops=dict(arrowstyle='-|>', color='#d4ac0d', lw=2), zorder=7)
+                for n, hp in z.get('branches', {}).items():
+                    ax.plot(hp[0], hp[1], 'o', ms=14, mfc='none', mec='#d4ac0d', mew=2.5, zorder=6)
+                    ax.text(hp[0] + 0.1, hp[1], n, color='#9a7d0a', fontsize=8, zorder=7)
+                ax.text(lx + 0.1, ly - 0.2, '훌라후프 보는 자리', color='#9a7d0a', fontsize=9, zorder=7)
+                continue
             b = z['box']
             ax.add_patch(Rectangle((b[0], b[1]), b[2] - b[0], b[3] - b[1], fill=False, ec='#d4ac0d', ls='--', lw=1.4, zorder=2))
             ax.text(b[0], b[3] + 0.05, '%s: v %.2f, 앞 %.2f m, 모서리 제자리 회전' % (z['name'], z.get('v', 0), z.get('lookahead', 0)),
