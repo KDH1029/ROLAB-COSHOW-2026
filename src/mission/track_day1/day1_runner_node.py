@@ -774,7 +774,11 @@ class Day1Runner(Node):
                     self.bench_report(s_r - self.plan.s_start, t - self.t_go)
             else:
                 s_r = self.prog.s
-            s_to = self.look['s'] if self.look is not None and self.look['step'] == 'go' else None   # stop at the look point
+            # only 6 m ahead: the whole lap + extra ends where the robot is 1.2 m after the start, and RPP calls a
+            # goal 'reached' as soon as the robot is within 0.1 m of the path's last pose (stalled the run, 11-19)
+            s_to = s_r + 6.0
+            if self.look is not None and self.look['step'] == 'go':
+                s_to = min(s_to, self.look['s'])                    # stop at the look point
             pts = TP.apply(self.T_ot, self.plan.points(s_r - 0.3, s_to))
         msg = self.make_path(pts)
         self.pub_path.publish(msg)

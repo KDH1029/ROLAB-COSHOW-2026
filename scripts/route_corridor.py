@@ -165,7 +165,7 @@ def main():
         zf = r['path'][:-4] + '.zones.json'
         zones = json.load(open(zf)) if os.path.exists(zf) else []
         zones = [z for z in zones if z.get('name') != name]
-        zones.append(dict(name=name, box=box, mode='legs', v=float(kv.get('v', 0.25)), lookahead=float(kv.get('look', 0.3)),
+        zones.append(dict(name=name, box=box, mode=kv.get('mode', 'rpp'), v=float(kv.get('v', 0.25)), lookahead=float(kv.get('look', 0.3)),
                           rotate=True, rotate_min_deg=float(kv.get('rot_deg', 35)), corners=legs.round(3).tolist()))
         json.dump(zones, open(zf, 'w'), indent=1)
         print('  %s: %d -> %d pins, zone file %s' % (os.path.basename(r['path']), len(r['pins']), len(P), os.path.basename(zf)))
