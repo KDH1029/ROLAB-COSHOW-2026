@@ -15,7 +15,8 @@ the robot slows to avoid_v. No way through -> it stops and waits; after block_s 
 Parameters (besides the runner's):
   cones          true | false   false = exactly the original runner (the scan is not used)
   cone_map       maps/coshow_1119 | none   course map (map.yaml + map.pgm, track frame); none = every cell is new
-  cone_new_tol   0.08   m, a scan cell farther than this from the map's cells is new (moved cone)
+  cone_new_tol   0.12   m, a scan cell farther than this from the map's cells is new (moved cone); 11-19 replay:
+                        scan vs map p95 4 cm, cone edges / walls up to 0.10-0.17 m
   cone_clear     0.20   m from the path to a scan cell (half width 0.155 + a little: the field is that tight)
   cone_keep_min  0.15   m, the taught route is left when any cell (even a mapped one) gets nearer than this
   cone_soft      0.40   m, nearer than this costs (keeps to the middle of a gap when it has to shift)
@@ -76,7 +77,7 @@ class ConeRunner(R.Day1Runner):
                                       min_clear=float(p('cone_min_clear', 0.17)), keep_min=float(p('cone_keep_min', 0.15)),
                                       dmax=float(p('cone_dmax', 0.90)), slope=float(p('cone_slope', 0.80)))
         self.cone_map = str(p('cone_map', os.path.join(ROOT, 'maps', 'coshow_1119')))
-        self.new_tol = float(p('cone_new_tol', 0.08))
+        self.new_tol = float(p('cone_new_tol', 0.12))
         self.mem = CA.ObstacleMemory(memory_s=float(p('cone_memory_s', 6.0)))
         self.cone_range = float(p('cone_range', 3.5))
         self.avoid_v = float(p('avoid_v', 0.30))

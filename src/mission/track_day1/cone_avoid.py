@@ -17,8 +17,8 @@ solved exactly by dynamic programming over the stations. No path at `clear` -> r
 -> 'blocked' (the caller stops, and after a while may force the least-bad path).
 
 Distances are to scan cells, i.e. the cone's surface at the LiDAR ring heights (0.2-0.6 m), a few cm inside the
-cone's base. The 11-19 cone field is tight: the taught route passes 0.16 m from the mapped bases (~0.2 m from
-what the scan sees) at its narrowest, so the defaults are clear 0.20 / keep_min 0.15, not a comfortable 0.3.
+cone's base. The 11-19 cone field is tight: the taught route passes 0.16 m from the mapped bases and 0.228 m from
+the scan cells (105326 replay) at its narrowest, so the defaults are clear 0.20 / keep_min 0.15, not 0.3.
 """
 import json
 import math
@@ -163,7 +163,9 @@ class ConePlanner:
             nn = np.asarray(obs)[np.asarray(new, bool)] if len(obs) else np.zeros((0, 2))
             dn = self.clearance(cKDTree(nn) if len(nn) else None, P)
             mn = float(dn[enforce].min()) if enforce.any() else math.inf
-        if not force and abs(e) < self.rejoin_tol and mn >= self.clear and mc >= self.keep_min:
+        # off the taught route by more than rejoin_tol only matters right after going around (prev): ease back.
+        # Otherwise (plain tracking error, e.g. in the zigzag) the taught route is sent as it is, like day1.sh run.
+        if not force and mn >= self.clear and mc >= self.keep_min and (abs(e) < self.rejoin_tol or prev is None):
             return dict(mode='taught', pts=P, off=np.zeros(S), min_clear=mc, used=self.clear)
         K = len(self.off)
         Q = P[:, None, :] + self.off[None, :, None] * N[:, None, :]           # (S, K, 2)
