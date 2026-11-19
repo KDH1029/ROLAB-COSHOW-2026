@@ -92,3 +92,7 @@ day1.sh down
 | lap1의 공통 구간 수정을 lap2에 반영 | `day1.sh sync rec105326_lap1 rec105326_lap2` |
 | 경로 목록 | `day1.sh routes` |
 | 3D 지도 보기 | `scripts/view_map.sh maps/coshow_1119` |
+
+## 콘 배치가 바뀌었을 때 (예비)
+
+`day1.sh run` 대신 `scripts/day1_cones.sh run …`(인자 같음)을 쓴다. 콘 구간에서 옮겨진 콘을 비켜 간다. 원래 실행은 바뀌지 않는다. 자세한 내용은 [CONES.md](CONES.md)에 있다.
