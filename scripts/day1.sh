@@ -8,6 +8,7 @@
 #                         around the cones; saved when back past the start (Enter = save now) -> logs/day1/routes/R.csv
 #   day1.sh run in|out route=R [v=0.4 lookahead=0.5]   follow the taught route R (same start, light, lap end)
 #   day1.sh routes        list taught routes
+#   day1.sh edit R        edit route R on the map (drag pins; s saves, old file kept as .bak_HHMMSS)
 #   day1.sh bench         table of logs/day1/bench.csv (one line per finished run: gait, v, lap time, lateral, roll/pitch)
 #   day1.sh vision push   copy the camera edge node to the internal PC (~/coshow_track)
 #   day1.sh vision start  camera (if not running) + edge node on the internal PC
@@ -123,7 +124,10 @@ case "${1:-}" in
     env_ros; shift
     A=(); for kv in "$@"; do case $kv in in|out) A+=(-p "lane:=$kv");; *=*) A+=(-p "${kv%%=*}:=${kv#*=}");; esac; done
     python3 "$TD/day1_teach_node.py" --ros-args "${A[@]}" 2>&1 | tee "$LOG/teach_$(date +%H%M%S).log";;
-  routes) ls -t "$LOG/routes/"*.csv 2>/dev/null | grep -v _raw || echo "no routes yet";;
+  routes) ls -t "$LOG/routes/"*.csv 2>/dev/null | grep -v -e _raw -e '\.bak_' || echo "no routes yet";;
+  edit)   # route editor on the map: day1.sh edit <route> [map=maps/coshow_1119]
+    f=$LOG/routes/${2:?route name}.csv; [ -f "$f" ] || { echo "★ no $f (day1.sh routes)"; exit 1; }
+    python3 "$ROOT/scripts/route_edit.py" "$f" "${@:3}";;
   bench) python3 "$TD/tools/bench_table.py" "${2:-$LOG/bench.csv}";;
   lightcheck)   # robot does not move: camera on, watch the real light for N s (default 20), camera off
     env_ros; python3 "$ROOT/src/vision/start_light/check_tl_live.py" "${2:-20}";;

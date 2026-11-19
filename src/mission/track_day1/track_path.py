@@ -143,6 +143,13 @@ def load_pins(path, lane):
             if len(v) < len(head) or int(float(v[k['lane']])) != lane:
                 continue
             rows.append((float(v[k['station_m']]), float(v[k['x_m']]), float(v[k['y_m']])))
+    if not rows:   # a route file that is not per lane (mission course, editor): all its pins
+        with open(path) as fh:
+            fh.readline()
+            for line in fh:
+                v = line.strip().split(',')
+                if len(v) >= len(head):
+                    rows.append((float(v[k['station_m']]), float(v[k['x_m']]), float(v[k['y_m']])))
     if len(rows) < 10:
         raise ValueError('%s: %d pins for lane %d (need >= 10)' % (path, len(rows), lane))
     rows.sort()
@@ -318,7 +325,7 @@ class StartLock:
         s2 = station(other, pose[0], pose[1])
         c2 = pose_at(other, s2)
         lat2 = -(pose[0] - c2[0]) * math.sin(c2[2]) + (pose[1] - c2[1]) * math.cos(c2[2])
-        if abs(lat2) < abs(lat_rb):
+        if isinstance(self.loop, RulebookLoop) and abs(lat2) < abs(lat_rb):   # a taught/edited route may leave the lane
             self.why = 'robot is in lane %d (%.2f m from its centre), not lane %d' % (other, abs(lat2), self.lane)
             return None
         if abs(lat) > self.max_lat or abs(head) > self.max_head:

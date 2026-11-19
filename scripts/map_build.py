@@ -6,7 +6,7 @@
   3. align: wall_align on the levelled map -> track frame (origin = track centre, x = long axis, the mapping start on
      the lower half y < 0, as in day 1). Measured wall spacing printed (arena 9.00 x 7.00)
   4. outputs in <out>: map_track.pcd (x y z intensity=count), map_track.npz, map.pgm/map.yaml (Nav2, 5 cm, occupied =
-     points 0.05..1.0 m above the local floor standing >= 0.10 m tall in the cell), map_top.png, report.txt
+     points 0.05..0.60 m above the local floor standing >= 0.10 m tall in the cell), map_top.png, report.txt
     python3 scripts/map_build.py <lio bag dir> <original bag dir> <out dir>
     python3 scripts/map_build.py --regrid <out dir>      # only the 2D grid and picture again, from map_track.npz
     python3 scripts/map_build.py --clean <out dir>       # arena-only cleaned map_clean.npz/pcd (+ grid, picture)
@@ -31,7 +31,7 @@ import wall_align as W    # noqa: E402
 VOX = 0.02
 MIN_COUNT = 2
 GRID = 0.05
-BAND = (0.05, 1.0)
+BAND = (0.05, 0.60)                # robot (with the XT16) is ~0.5 m tall: higher things (arch beam) do not block
 
 
 def reader(bag, topics):
