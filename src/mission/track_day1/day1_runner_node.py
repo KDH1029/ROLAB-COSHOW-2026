@@ -136,6 +136,8 @@ class Day1Runner(Node):
         self.look_done = False
         self.hoop_seen = []       # (time, world bearing of the wanted colour)
         self.hoop_pick = None     # key 1 / 2 while looking
+        self.legs = None          # narrow corridor: corner-to-corner driving (zone 'corners', mode 'legs')
+        self.legs_done = set()
         self.last_rot = None
         self.gate = DL.LightGate(need_s=self.green_s)
         self.lap = DL.LapEnd(self.lane, extra=self.extra)
@@ -518,6 +520,88 @@ class Day1Runner(Node):
             if name is not None:
                 self.look_switch(name, why, s_r)
 
+    # ------------------------------------------------------------------ narrow corridor: corner to corner
+    LEG_TURN_DEG = 15.0      # turn in place first when the next leg is this far off
+    LEG_AHEAD = 0.25         # m, aim point ahead on the leg line
+    LEG_REACHED = 0.03       # m before the corner = reached
+
+    def twist(self, vx=0.0, wz=0.0):
+        tw = Twist()
+        tw.linear.x, tw.angular.z = float(vx), float(wz)
+        self.pub_cmd.publish(tw)
+
+    def legs_start(self, t, tp, z):
+        """RPP off: from where the robot is, straight to each corner of the zone, turning in place at the corners."""
+        if self.goal_handle is not None:
+            self.goal_handle.cancel_goal_async()
+            self.goal_handle = None
+        self.twist()
+        C = np.array(z['corners'], float)
+        # skip corners already behind (re-entry, or entering past the first one)
+        k = 0
+        while k + 1 < len(C) and np.dot(np.array(tp[:2]) - C[k], C[k + 1] - C[k]) > 0:
+            k += 1
+        pts = np.vstack([np.array(tp[:2])[None, :], C[k:]])
+        self.legs = dict(zone=z, pts=pts, i=0, t0=t, t=t, step=None, v=float(z.get('v', 0.25)))
+        self.state = 'LEGS'
+        self.legs_next_step(t, tp)
+        self.get_logger().info('★ zone %s: corner to corner, %d legs (RPP off)' % (z['name'], len(pts) - 1))
+
+    def legs_next_step(self, t, tp):
+        L = self.legs
+        a, b = L['pts'][L['i']], L['pts'][L['i'] + 1]
+        err = TP.wrap(math.atan2(b[1] - a[1], b[0] - a[0]) - tp[2])
+        L['step'] = 'turn' if abs(err) > math.radians(self.LEG_TURN_DEG) else 'drive'
+        L['t'] = t
+
+    def legs_end(self, t, why):
+        z = self.legs['zone']
+        self.twist()
+        self.legs_done.add(z['name'])
+        self.legs = None
+        self.state = 'RUN'
+        self.last_goal_t = 0.0      # RPP takes over from where the robot is
+        self.get_logger().info('zone %s: %s — back to the route' % (z['name'], why))
+
+    def legs_tick(self, t, tp):
+        L = self.legs
+        if t - L['t0'] > 60.0:
+            self.get_logger().warn('★ zone %s took over 60 s' % L['zone']['name'])
+            self.legs_end(t, 'timeout')
+            return
+        a, b = L['pts'][L['i']], L['pts'][L['i'] + 1]
+        d = b - a
+        Ld = max(1e-6, float(np.hypot(*d)))
+        u = d / Ld
+        hd = math.atan2(u[1], u[0])
+        p = np.array(tp[:2])
+        if L['step'] == 'turn':
+            err = TP.wrap(hd - tp[2])
+            if abs(err) < math.radians(6) or t - L['t'] > 8.0:
+                self.twist()
+                L['step'], L['t'] = 'drive', t
+                return
+            self.twist(0.0, math.copysign(min(0.6, max(0.3, 1.2 * abs(err))), err))
+            return
+        along = float(np.dot(p - a, u))
+        rem = Ld - along
+        if rem < self.LEG_REACHED:
+            L['i'] += 1
+            if L['i'] >= len(L['pts']) - 1:
+                self.legs_end(t, 'last corner reached in %.1f s' % (t - L['t0']))
+                return
+            self.twist()
+            self.legs_next_step(t, tp)
+            return
+        tgt = a + u * min(Ld, max(0.0, along) + self.LEG_AHEAD)
+        ang = TP.wrap(math.atan2(tgt[1] - p[1], tgt[0] - p[0]) - tp[2])
+        wz = max(-0.6, min(0.6, 1.5 * ang))
+        vx = L['v'] if rem > 0.3 else max(0.1, L['v'] * rem / 0.3)
+        if abs(ang) > math.radians(30):      # far off the line: turn before walking on
+            vx = 0.0
+            wz = math.copysign(max(0.3, abs(wz)), wz)
+        self.twist(vx, wz)
+
     def track_pose(self, cur):
         return TP.compose(self.T_to, cur)
 
@@ -653,6 +737,10 @@ class Day1Runner(Node):
                 s_r = self.prog.feed(tp[0], tp[1])
                 self.look_tick(t, tp, s_r)
                 return
+            elif self.state == 'LEGS':
+                self.prog.feed(tp[0], tp[1])
+                self.legs_tick(t, tp)
+                return
             elif self.state in ('RUN', 'FINISH'):
                 if self.state == 'RUN' and t - self.t_go < 3.0 and t - self.cam_pub_t > 1.0:
                     self.pub_cam.publish(Bool(data=False))   # light no longer needed (repeat: one can be lost)
@@ -660,6 +748,11 @@ class Day1Runner(Node):
                 s_r = self.prog.feed(tp[0], tp[1])
                 if self.zones and self.state == 'RUN':
                     self.zone_switch(self.zone_at(tp[0], tp[1]))
+                    z = self.zone
+                    if (z is not None and z.get('corners') and z.get('mode', 'legs') == 'legs'
+                            and z['name'] not in self.legs_done):
+                        self.legs_start(t, tp, z)
+                        return
                 if self.state == 'RUN' and s_r - self.plan.s_start > 2.5 and self.last_rot is not None:   # past the blend
                     self.bench['lat'].append(TP.lateral_of(self.loop, tp[0], tp[1])[0])
                     q = self.last_rot
