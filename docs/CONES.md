@@ -7,7 +7,7 @@
 `day1.sh up`(그리고 `xt16`, `light`)까지는 원래 순서와 같다. `run` 대신 아래 명령을 쓴다. 인자는 `day1.sh run`과 같다.
 
 ```bash
-~/ws/ROLAB-COSHOW-2026/scripts/day1_cones.sh run route=rec105326_lap1 hoop=red v=0.4
+~/ws/ROLAB-COSHOW-2026/scripts/day1_cones.sh run route=rec105326_lap1 hoop=red v=0.8
 ```
 
 출발 위치 잡기, 신호등, 지그재그, 훌라후프, 한 바퀴 끝은 원래 주행기와 똑같다. 다른 점은 콘 구간 상자 안에서만 생긴다.
