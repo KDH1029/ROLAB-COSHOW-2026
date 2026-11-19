@@ -14,7 +14,7 @@ case $LANE in in) FLANE=2;; out) FLANE=1;; *) FLANE=$LANE;; esac
 [ "$MODE" = wall ] && export ODOM=fake || export ODOM=builtin
 export ROS_DOMAIN_ID=${TEST_DOMAIN:-81}
 export CYCLONEDDS_URI='<CycloneDDS><Domain id="any"><General><Interfaces><NetworkInterface name="lo"/></Interfaces><AllowMulticast>false</AllowMulticast></General><Discovery><ParticipantIndex>auto</ParticipantIndex><MaxAutoParticipantIndex>60</MaxAutoParticipantIndex><Peers><Peer address="localhost"/></Peers></Discovery></Domain></CycloneDDS>'
-export DAY1_LOG=$ROOT/logs/day1_test; rm -rf "$DAY1_LOG"; mkdir -p "$DAY1_LOG"
+export DAY1_LOG=${DAY1_TEST_LOG:-$ROOT/logs/day1_test}; rm -rf "$DAY1_LOG"; mkdir -p "$DAY1_LOG"
 [ -n "${ROUTES_FROM:-}" ] && cp -r "$ROUTES_FROM" "$DAY1_LOG/routes"     # for VIA_SH=1 SH_ARGS=route=...
 set +u; source /opt/ros/jazzy/setup.bash; source ~/unitree_ros2/cyclonedds_ws/install/setup.bash >/dev/null 2>&1; source "$ROOT/install/setup.bash"; set -u
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
