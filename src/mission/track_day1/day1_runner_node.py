@@ -125,6 +125,22 @@ class Day1Runner(Node):
         zf = self.path_file[:-4] + '.zones.json' if self.path_file.endswith('.csv') else ''
         if zf and os.path.exists(zf):
             self.zones = json.load(open(zf))
+        # hoop=in|out: the branch is known before the run — take that route now, no stop, no vision
+        if self.hoop in ('in', 'inner', 'out', 'outer'):
+            lz = next((z for z in self.zones if z.get('type') == 'look'), None)
+            if lz is None:
+                raise SystemExit('hoop=%s but %s has no hula-hoop look point' % (self.hoop, os.path.basename(self.path_file)))
+            # inner = the hoop nearer the track centre
+            order = sorted(lz['branches'], key=lambda n: math.hypot(*lz['branches'][n]))
+            pick = order[0] if self.hoop in ('in', 'inner') else order[-1]
+            f = os.path.join(os.path.dirname(self.path_file), pick + '.csv')
+            if os.path.abspath(f) != os.path.abspath(self.path_file):
+                self.path_file = f
+                self.loop = TP.load_pins(f, self.lane)
+                zf = f[:-4] + '.zones.json'
+                self.zones = json.load(open(zf)) if os.path.exists(zf) else []
+            self.look_done = True
+            self.get_logger().info('hoop %s: route %s from the start (no look, no vision)' % (self.hoop, pick))
         self.wlock = TP.StartLock(self.lane, n=self.lock_n, max_lat=self.max_lat, max_head_deg=self.max_head,
                                   loop=self.loop, offset=self.track_off)
         self.plan = self.prog = self.T_to = self.T_ot = None   # wall mode: plan in the track frame, track <- odom
@@ -133,7 +149,7 @@ class Day1Runner(Node):
         self.cam_pub_t = 0.0      # camera_active is re-sent every second (a single message can be lost)
         self.force_go = False     # key g while waiting: start without the light
         self.look = None          # pending look point (zone of type 'look'), its station, sub-step
-        self.look_done = False
+        self.look_done = self.hoop in ('in', 'inner', 'out', 'outer')   # branch fixed before the run: no look
         self.hoop_seen = []       # (time, world bearing of the wanted colour)
         self.hoop_pick = None     # key 1 / 2 while looking
         self.legs = None          # narrow corridor: corner-to-corner driving (zone 'corners', mode 'legs')
