@@ -118,7 +118,7 @@ class Day1Runner(Node):
             if self.light == 'none':
                 raise SystemExit('light=none needs debug=true (competition: the start must come from the light)')
         self.look_timeout = float(p('look_timeout', 10.0).value)   # s without the hoop vision, then a random branch
-        self.light_timeout = float(p('light_timeout', 20.0).value)   # s waiting for GREEN, then go anyway (0 = never)
+        self.light_timeout = float(p('light_timeout', 0.0).value)   # s waiting for GREEN, then go anyway; 0 = never (default, 11-20)
         self.wait_t = None
         if self.mode not in ('wall', 'vision'):
             raise SystemExit('mode must be wall or vision')
