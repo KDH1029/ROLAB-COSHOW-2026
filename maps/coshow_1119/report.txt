@@ -4,4 +4,5 @@ floor tilt corrected 0.64 deg, mapping start 0.354 m above the floor
 wall fit: spacing 7.007 x 9.019 m (arena 9.00 x 7.00), rms 0.023 m, walls 4; mapping start at track (-0.52, -2.23) yaw 0.6 deg
 trajectory 51.5 m, 169 s, start-end 0.11 m, height 0.19..0.47 m
 floor: 315 cells, local floor heights -0.037..0.093 m, floor thickness (p5..p95 around it) 0.120 m
-grid 200 x 160 at 0.05 m: occupied 6489 cells (points 0.05..1.00 m above the local floor standing >= 0.10 m tall in the cell), free 21097
+clean: kept 473611 of 1786681 voxels (inside the wall, floor..1.2 m, 3-25 cm layer seen >= 6x, lone specks dropped)
+grid 200 x 160 at 0.05 m: occupied 2211 cells (points 0.05..1.00 m above the local floor standing >= 0.10 m tall in the cell), free 20045

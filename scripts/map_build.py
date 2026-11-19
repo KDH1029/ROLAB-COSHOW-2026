@@ -9,6 +9,7 @@
      points 0.05..1.0 m above the local floor standing >= 0.10 m tall in the cell), map_top.png, report.txt
     python3 scripts/map_build.py <lio bag dir> <original bag dir> <out dir>
     python3 scripts/map_build.py --regrid <out dir>      # only the 2D grid and picture again, from map_track.npz
+    python3 scripts/map_build.py --clean <out dir>       # arena-only cleaned map_clean.npz/pcd (+ grid, picture)
 """
 import math
 import os
@@ -142,6 +143,58 @@ def write_grid(out, occupied, seen, x0, y0):
                 % (GRID, x0, y0))
 
 
+def clean(M, hz, cnt, margin=0.10, zmax=1.2, low=(0.03, 0.25), low_count=6, base_count=3, min_nb=4):
+    """Arena-only map: inside the wall (+margin), floor..zmax, the 3-25 cm layer only where seen >= low_count times
+    (floor streaks from pitch lag are seen by few scans; ramps, tyres and cone bases by many), then voxels with fewer
+    than min_nb of their 26 neighbours dropped (lone specks). Returns the kept mask."""
+    hx, hy = T.WALL_LX / 2 + margin, T.WALL_LY / 2 + margin
+    keep = (np.abs(M[:, 0]) < hx) & (np.abs(M[:, 1]) < hy) & (hz > -0.03) & (hz < zmax) & (cnt >= base_count)
+    lay = (hz >= low[0]) & (hz < low[1])
+    keep &= ~lay | (cnt >= low_count)
+    idx = np.nonzero(keep)[0]
+    g = np.floor(M[idx] / VOX).astype(np.int64) + 2 ** 20
+    key = (g[:, 0] << 42) | (g[:, 1] << 21) | g[:, 2]
+    ks = np.sort(key)
+    nb = np.zeros(len(idx), int)
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                if dx == dy == dz == 0:
+                    continue
+                q = key + (dx << 42) + (dy << 21) + dz
+                pos = np.searchsorted(ks, q)
+                pos[pos >= len(ks)] = len(ks) - 1
+                nb += ks[pos] == q
+    keep[idx[nb < min_nb]] = False
+    return keep
+
+
+def write_pcd(path, M, val):
+    with open(path, 'wb') as f:
+        f.write(('# .PCD v0.7\nVERSION 0.7\nFIELDS x y z intensity\nSIZE 4 4 4 4\nTYPE F F F F\nCOUNT 1 1 1 1\n'
+                 'WIDTH %d\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS %d\nDATA binary\n' % (len(M), len(M))).encode())
+        f.write(np.column_stack([M, val]).astype(np.float32).tobytes())
+
+
+def clean_map(out):
+    """map_track.npz -> map_clean.npz / map_clean.pcd (intensity = height above floor) + 2D grid from the clean points."""
+    d = np.load(os.path.join(out, 'map_track.npz'))
+    M, hz, cnt, traj = d['xyz'].astype(np.float64), d['height'].astype(np.float64), d['count'], d['traj']
+    k = clean(M, hz, cnt)
+    np.savez_compressed(os.path.join(out, 'map_clean.npz'), xyz=M[k].astype(np.float32), height=hz[k].astype(np.float32),
+                        count=cnt[k].astype(np.int32), traj=traj)
+    write_pcd(os.path.join(out, 'map_clean.pcd'), M[k], hz[k])
+    occupied, seen, x0, y0, info = make_grid(M[k], hz[k])
+    write_grid(out, occupied, seen, x0, y0)
+    picture(os.path.join(out, 'map_top.png'), M[k], hz[k], traj, occupied, x0, y0, os.path.basename(out.rstrip('/')) + ' (clean)')
+    msg = 'clean: kept %d of %d voxels (inside the wall, floor..1.2 m, 3-25 cm layer seen >= 6x, lone specks dropped)' % (k.sum(), len(k))
+    lines = [l for l in open(os.path.join(out, 'report.txt')).read().splitlines() if not l.startswith(('grid ', 'clean:'))]
+    with open(os.path.join(out, 'report.txt'), 'w') as f:
+        f.write('\n'.join(lines + [msg, info]) + '\n')
+    print(msg)
+    print(info)
+
+
 def regrid(out):
     """Rebuild map.pgm/map.yaml/map_top.png from map_track.npz (no replay)."""
     d = np.load(os.path.join(out, 'map_track.npz'))
@@ -238,6 +291,7 @@ def main():
     with open(os.path.join(out, 'report.txt'), 'w') as f:
         f.write('\n'.join(rep) + '\n')
     print('\n'.join(rep))
+    clean_map(out)
     print('-> %s' % out)
 
 
@@ -281,5 +335,7 @@ def picture(path, M, hz, traj, occupied, x0, y0, name):
 if __name__ == '__main__':
     if len(sys.argv) == 3 and sys.argv[1] == '--regrid':
         regrid(sys.argv[2])
+    elif len(sys.argv) == 3 and sys.argv[1] == '--clean':
+        clean_map(sys.argv[2])
     else:
         main()
