@@ -112,6 +112,15 @@ def main():
         raw_line, = ax.plot(raw[:, 0], raw[:, 1], color='#f5a623', lw=0.8, alpha=0.7, zorder=2, label='녹화 주행')
     else:
         raw_line = None
+    zf = path[:-4] + '.zones.json'
+    if os.path.exists(zf):     # zones of this route (route_corridor.py): other driving inside
+        import json
+        from matplotlib.patches import Rectangle
+        for z in json.load(open(zf)):
+            b = z['box']
+            ax.add_patch(Rectangle((b[0], b[1]), b[2] - b[0], b[3] - b[1], fill=False, ec='#d4ac0d', ls='--', lw=1.4, zorder=2))
+            ax.text(b[0], b[3] + 0.05, '%s: v %.2f, 앞 %.2f m, 모서리 제자리 회전' % (z['name'], z.get('v', 0), z.get('lookahead', 0)),
+                    color='#9a7d0a', fontsize=9, zorder=7)
     smooth, = ax.plot([], [], color='#1f6fb2', lw=1.6, zorder=3)
     poly, = ax.plot([], [], color='#1f6fb2', lw=0.6, ls=':', zorder=3)
     dots = ax.scatter([], [], s=60, zorder=5, edgecolors='k', linewidths=0.6)

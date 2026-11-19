@@ -114,6 +114,11 @@ class Day1Runner(Node):
         self.tfl = TransformListener(self.tf, self)
         self.path = LP.LanePath(self.lane)          # vision mode
         self.loop = TP.load_pins(self.path_file, self.lane) if self.path_file else TP.RulebookLoop(self.lane)
+        # zones next to the route (<route>.zones.json, scripts/route_corridor.py): other driving inside a box
+        self.zones, self.zone = [], None
+        zf = self.path_file[:-4] + '.zones.json' if self.path_file.endswith('.csv') else ''
+        if zf and os.path.exists(zf):
+            self.zones = json.load(open(zf))
         self.wlock = TP.StartLock(self.lane, n=self.lock_n, max_lat=self.max_lat, max_head_deg=self.max_head,
                                   loop=self.loop, offset=self.track_off)
         self.plan = self.prog = self.T_to = self.T_ot = None   # wall mode: plan in the track frame, track <- odom
@@ -166,10 +171,11 @@ class Day1Runner(Node):
         self.set_rpp_speed(self.v)
         if self.mode == 'wall':
             self.get_logger().info('path: %s, %.2f m/lap (rulebook %.2f) · track offset dx %+.3f dy %+.3f m dyaw %+.2f deg'
-                                   ' · RPP lookahead %s min_radius %s'
+                                   ' · RPP lookahead %s min_radius %s · zones %s'
                                    % (self.loop.name, self.loop.length, T.LAP_LEN[self.lane], self.track_off[0],
                                       self.track_off[1], math.degrees(self.track_off[2]),
-                                      self.lookahead or 'yaml', self.min_radius or 'yaml'))
+                                      self.lookahead or 'yaml', self.min_radius or 'yaml',
+                                      ', '.join(z['name'] for z in self.zones) or 'none'))
         if self.state == 'LOCK':
             self.start_lock()
 
@@ -200,6 +206,42 @@ class Day1Runner(Node):
         r.parameter = parameter
         self.pub_req.publish(r)
 
+    def set_rpp(self, values):
+        """FollowPath parameters by name (float or bool), fire and forget."""
+        if not self.cli_param.service_is_ready():
+            self.get_logger().warn('controller_server parameters not reachable — zone settings not applied')
+            return
+        req = SetParameters.Request()
+        for k, v in values.items():
+            pv = (ParameterValue(type=ParameterType.PARAMETER_BOOL, bool_value=v) if isinstance(v, bool)
+                  else ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=float(v)))
+            req.parameters.append(ParamMsg(name='FollowPath.' + k, value=pv))
+        self.cli_param.call_async(req)
+
+    def zone_at(self, x, y, margin=0.3):
+        for z in self.zones:
+            b = z['box']
+            if b[0] - margin < x < b[2] + margin and b[1] - margin < y < b[3] + margin:
+                return z
+        return None
+
+    def zone_switch(self, z):
+        """Entering a zone: its speed, look-ahead and turning in place at corners. Leaving: the run's own settings."""
+        if z is self.zone:
+            return
+        if z is not None:
+            self.set_rpp({'desired_linear_vel': min(self.v, z.get('v', self.v)),
+                          'lookahead_dist': z.get('lookahead', 0.3),
+                          'use_rotate_to_heading': bool(z.get('rotate', True)),
+                          'rotate_to_heading_min_angle': math.radians(z.get('rotate_min_deg', 35.0))})
+            self.get_logger().info('★ zone %s: v %.2f, look-ahead %.2f m, turn in place over %.0f deg'
+                                   % (z['name'], min(self.v, z.get('v', self.v)), z.get('lookahead', 0.3), z.get('rotate_min_deg', 35.0)))
+        else:
+            self.set_rpp({'desired_linear_vel': self.v, 'lookahead_dist': self.lookahead if self.lookahead > 0 else 0.8,
+                          'use_rotate_to_heading': False, 'rotate_to_heading_min_angle': 0.785})
+            self.get_logger().info('zone %s left: back to v %.2f' % (self.zone['name'], self.v))
+        self.zone = z
+
     def set_rpp_speed(self, v):
         if not self.cli_param.wait_for_service(timeout_sec=0.5):
             self.get_logger().warn('controller_server parameters not reachable — RPP keeps its yaml speed')
@@ -207,9 +249,14 @@ class Day1Runner(Node):
         req = SetParameters.Request()
         req.parameters = [ParamMsg(name='FollowPath.desired_linear_vel',
                                    value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=float(v)))]
-        if self.lookahead > 0:
-            req.parameters.append(ParamMsg(name='FollowPath.lookahead_dist', value=ParameterValue(
-                type=ParameterType.PARAMETER_DOUBLE, double_value=float(self.lookahead))))
+        # always the run's own look-ahead and no turning in place: a run stopped inside a zone leaves its settings
+        # in controller_server (its parameters outlive the runner)
+        req.parameters.append(ParamMsg(name='FollowPath.lookahead_dist', value=ParameterValue(
+            type=ParameterType.PARAMETER_DOUBLE, double_value=float(self.lookahead if self.lookahead > 0 else 0.8))))
+        req.parameters.append(ParamMsg(name='FollowPath.use_rotate_to_heading', value=ParameterValue(
+            type=ParameterType.PARAMETER_BOOL, bool_value=False)))
+        req.parameters.append(ParamMsg(name='FollowPath.rotate_to_heading_min_angle', value=ParameterValue(
+            type=ParameterType.PARAMETER_DOUBLE, double_value=0.785)))
         if self.min_radius > 0:
             req.parameters.append(ParamMsg(name='FollowPath.regulated_linear_scaling_min_radius', value=ParameterValue(
                 type=ParameterType.PARAMETER_DOUBLE, double_value=float(self.min_radius))))
@@ -470,6 +517,8 @@ class Day1Runner(Node):
                     self.pub_cam.publish(Bool(data=False))   # light no longer needed (repeat: one can be lost)
                     self.cam_pub_t = t
                 s_r = self.prog.feed(tp[0], tp[1])
+                if self.zones and self.state == 'RUN':
+                    self.zone_switch(self.zone_at(tp[0], tp[1]))
                 if self.state == 'RUN' and s_r - self.plan.s_start > 2.5 and self.last_rot is not None:   # past the blend
                     self.bench['lat'].append(TP.lateral_of(self.loop, tp[0], tp[1])[0])
                     q = self.last_rot
