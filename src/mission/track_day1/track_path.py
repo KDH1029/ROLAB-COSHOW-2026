@@ -150,6 +150,61 @@ def load_pins(path, lane):
     return PinLoop(R[:, 1:3], s0=R[0, 0], name='pins %s (%d)' % (path.split('/')[-1], len(rows)))
 
 
+def route_from_trajectory(P, lane, ds=0.25, smooth_m=0.4, min_frac=0.6, close_m=0.6):
+    """Taught drive (N, 2 track-frame points, start first) -> one closed lap of pins (M, 3: station, x, y).
+
+    The lap ends where the drive comes back past the start (first approach within close_m after min_frac of a
+    rulebook lap); the rest is dropped. Jitter is smoothed over smooth_m along the path, then pins every ds.
+    Returns (pins, info) with info: closed, gap_m (end to start), length_m, dropped_m."""
+    P = np.asarray(P, float)[:, :2]
+    keep = np.concatenate([[True], np.hypot(*np.diff(P, axis=0).T) > 0.01])
+    P = P[keep]
+    d = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
+    r = np.hypot(*(P - P[0]).T)
+    cand = np.nonzero((d > min_frac * lap_len(lane)) & (r < close_m))[0]
+    closed = len(cand) > 0
+    if closed:
+        i = cand[0]
+        while i + 1 < len(P) and r[i + 1] <= r[i]:     # closest approach to the start
+            i += 1
+        dropped, P, d = d[-1] - d[i], P[:i + 1], d[:i + 1]
+    else:
+        dropped = 0.0
+    gap = float(np.hypot(*(P[-1] - P[0])))
+    # close smoothly: shift the last metre onto the start instead of a kink at the join
+    if gap > 0.01 and d[-1] > 2.0:
+        w = np.clip((d - (d[-1] - 1.0)) / 1.0, 0.0, 1.0)[:, None]
+        P = P + w * (P[0] - P[-1])
+        P, d = P[:-1], d[:-1]
+        d = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
+    L = d[-1] + float(np.hypot(*(P[-1] - P[0])))      # closed: back to the start
+    n = max(8, int(round(L / 0.05)))
+    u = np.linspace(0.0, L, n, endpoint=False)
+    dd = np.concatenate([d, [L]])
+    PP = np.vstack([P, P[:1]])
+    Q = np.column_stack([np.interp(u, dd, PP[:, 0]), np.interp(u, dd, PP[:, 1])])   # 5 cm, uniform
+    w = max(1, int(round(smooth_m / 0.05 / 2)))
+    if w > 1:
+        k = np.ones(2 * w + 1) / (2 * w + 1)
+        Q = np.column_stack([np.convolve(np.concatenate([Q[-w:, j], Q[:, j], Q[:w, j]]), k, mode='valid') for j in (0, 1)])
+    m = max(8, int(round(L / ds)))
+    idx = (np.arange(m) * len(Q) / m).astype(int)
+    Q = Q[idx]
+    st = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(Q, axis=0).T))])
+    pins = np.column_stack([st, Q])
+    return pins, dict(closed=closed, gap_m=round(gap, 3), length_m=round(float(L), 2), dropped_m=round(float(dropped), 2))
+
+
+def save_route_csv(path, lane, pins):
+    """Pins in the path_file format (lane,station_m,x_m,y_m,yaw_deg)."""
+    nxt = np.roll(pins[:, 1:3], -1, 0)
+    yaw = np.degrees(np.arctan2(nxt[:, 1] - pins[:, 2], nxt[:, 0] - pins[:, 1]))
+    with open(path, 'w') as f:
+        f.write('lane,station_m,x_m,y_m,yaw_deg\n')
+        for (s, x, y), a in zip(pins, yaw):
+            f.write('%d,%.3f,%.4f,%.4f,%.1f\n' % (lane, s, x, y, a))
+
+
 def lateral_of(loop, x, y):
     """Signed offset (+ = left of travel) and heading of the closest loop point."""
     s = loop.station(x, y)
@@ -227,7 +282,16 @@ class StartLock:
             self.why = 'wall: ' + wall.get('why', '?')
             return None
         tw = (wall['x'], wall['y'], wall['yaw'])
-        if self.buf:   # keep the same 180 deg twin as the first sample
+        if not self.buf and not isinstance(self.loop, RulebookLoop):
+            # a taught route is not 180 deg symmetric (cones): take the twin nearer to where the teaching started
+            sx, sy = self.loop.pts[0]
+            def cost(p):
+                q = compose(self.off_inv, p)
+                return math.hypot(q[0] - sx, q[1] - sy)
+            twin = (-tw[0], -tw[1], wrap(tw[2] + math.pi))
+            if cost(twin) < cost(tw):
+                tw = twin
+        elif self.buf:   # keep the same 180 deg twin as the first sample
             p = self.buf[0][1]
             if math.hypot(tw[0] - p[0], tw[1] - p[1]) > math.hypot(-tw[0] - p[0], -tw[1] - p[1]):
                 tw = (-tw[0], -tw[1], wrap(tw[2] + math.pi))
@@ -246,8 +310,9 @@ class StartLock:
             return None
         Tto = (float(A[:, 0].mean()), float(A[:, 1].mean()), yc)
         pose = compose(Tto, self.buf[-1][2])
-        lat, cyaw, s = lateral_of(self.loop, pose[0], pose[1])
-        head = wrap(pose[2] - cyaw)
+        lat, _, s = lateral_of(self.loop, pose[0], pose[1])
+        a, b = self.loop.pose_at(s), self.loop.pose_at(s + 0.5)        # direction of the next 0.5 m (no kink)
+        head = wrap(pose[2] - math.atan2(b[1] - a[1], b[0] - a[0]))
         lat_rb = lateral_of(RulebookLoop(self.lane), pose[0], pose[1])[0]   # lane membership: rulebook lanes
         other = 2 if self.lane == 1 else 1
         s2 = station(other, pose[0], pose[1])
@@ -259,6 +324,10 @@ class StartLock:
         if abs(lat) > self.max_lat or abs(head) > self.max_head:
             self.why = 'placement: lateral %+.2f m, heading %+.1f deg (limits %.2f m, %.0f deg)' % (
                 lat, math.degrees(head), self.max_lat, math.degrees(self.max_head))
+            return None
+        far = 0.0 if isinstance(self.loop, RulebookLoop) else math.hypot(pose[0] - self.loop.pts[0][0], pose[1] - self.loop.pts[0][1])
+        if far > 1.0:
+            self.why = 'robot is %.1f m from where the route was taught to start — wrong start mark?' % far
             return None
         self.why = ''
         return dict(T_track_odom=Tto, pose=pose, s=s, lateral=lat, heading_err=head)

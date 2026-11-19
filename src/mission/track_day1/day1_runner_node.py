@@ -89,6 +89,7 @@ class Day1Runner(Node):
         self.gait = g != 'none'
         self.gait_api, self.gait_param = GAITS.get(g, (0, '{}'))
         self.lookahead = float(p('lookahead', 0.0).value)        # m, 0 = keep the yaml (0.8)
+        self.min_radius = float(p('min_radius', 0.0).value)      # m, RPP slows below this radius; 0 = yaml (0.9)
         self.init_frames = int(p('init_frames', 3).value)
         self.edges_topic = str(p('edges_topic', '/track/edges').value)
         self.odom_frame = str(p('odom_frame', 'odom').value)
@@ -165,8 +166,10 @@ class Day1Runner(Node):
         self.set_rpp_speed(self.v)
         if self.mode == 'wall':
             self.get_logger().info('path: %s, %.2f m/lap (rulebook %.2f) · track offset dx %+.3f dy %+.3f m dyaw %+.2f deg'
+                                   ' · RPP lookahead %s min_radius %s'
                                    % (self.loop.name, self.loop.length, T.LAP_LEN[self.lane], self.track_off[0],
-                                      self.track_off[1], math.degrees(self.track_off[2])))
+                                      self.track_off[1], math.degrees(self.track_off[2]),
+                                      self.lookahead or 'yaml', self.min_radius or 'yaml'))
         if self.state == 'LOCK':
             self.start_lock()
 
@@ -207,6 +210,9 @@ class Day1Runner(Node):
         if self.lookahead > 0:
             req.parameters.append(ParamMsg(name='FollowPath.lookahead_dist', value=ParameterValue(
                 type=ParameterType.PARAMETER_DOUBLE, double_value=float(self.lookahead))))
+        if self.min_radius > 0:
+            req.parameters.append(ParamMsg(name='FollowPath.regulated_linear_scaling_min_radius', value=ParameterValue(
+                type=ParameterType.PARAMETER_DOUBLE, double_value=float(self.min_radius))))
         self.cli_param.call_async(req)
 
     def bridge_state(self, activate):

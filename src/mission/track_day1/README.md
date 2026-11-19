@@ -40,6 +40,18 @@ scripts/day1.sh down
 
 Runner parameters: `in` / `out` (or `lane` = 2 / 1), `v` (m/s), `extra` (m past one lap, default 1.2), `green_s`, `light` (`model`, `none` for tests only), `gait`, `max_lat` (0.35 m), `max_head` (15°), `lock_n` (5 scans), `track_dx` / `track_dy` / `track_dyaw_deg`, `path_file` (below).
 
+### Taught route (cones on the track)
+Fixed obstacles: drive the route once with the remote, then the runner repeats it.
+```bash
+scripts/day1.sh teach in name=cones_in   # robot standing on its start mark (after up): drive ONE lap with the remote,
+                                          # saved when it comes back past the start (Enter = save now, x = discard)
+scripts/day1.sh run in route=cones_in v=0.5
+scripts/day1.sh routes                    # list; each route has a .png next to it
+```
+- Nothing goes to the motors while teaching. The route is stored in the track frame (from the wall), so a start placed a bit differently still uses it. The lap end is one route lap + `extra`.
+- ★ Start from the mark you taught from. The wall cannot tell the two straights apart (180° symmetry), so a route taught from one start mark is wrong from the opposite one: teach one route per start mark. The runner refuses a start more than 1 m from where teaching began.
+- `route=` runs default to `lookahead=0.5` and `min_radius=0.4` (RPP slows down only below 0.4 m radius). On a ±18 cm / 2 m slalom: route error max 6.7 cm (0.8 m look-ahead: 13.6 cm), 0.5 m/s ~34 s, 0.6 m/s ~29 s on the inner course.
+
 ### Changing the path (default: none)
 The wall fit gives the centre of the wall rectangle. By default the drawn track is assumed to sit exactly in it, 0.495 m from the wall on every side (rulebook).
 

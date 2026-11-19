@@ -4,6 +4,10 @@
 #                         (min_wz/min_vy 0, inactive) + Nav2 controller_server(RPP).  ★ robot standing still (IMU init)
 #                         ODOM=builtin: built-in odometry x1.189 instead (vision spare), ODOM=fake: test only
 #                         MAX_VX=0.8 bridge forward-speed limit (the runner lowers v to it), TRIM=0 no ClassicWalk yaw trim
+#   day1.sh teach in|out name=R   robot standing on its start mark (after up): drive ONE lap with the remote
+#                         around the cones; saved when back past the start (Enter = save now) -> logs/day1/routes/R.csv
+#   day1.sh run in|out route=R [v=0.4 lookahead=0.5]   follow the taught route R (same start, light, lap end)
+#   day1.sh routes        list taught routes
 #   day1.sh bench         table of logs/day1/bench.csv (one line per finished run: gait, v, lap time, lateral, roll/pitch)
 #   day1.sh vision push   copy the camera edge node to the internal PC (~/coshow_track)
 #   day1.sh vision start  camera (if not running) + edge node on the internal PC
@@ -115,6 +119,11 @@ case "${1:-}" in
       *) echo "vision push|start|stop|status|snap";;
     esac;;
   light) "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh start';;
+  teach)   # drive one lap with the remote, the lap is saved as a route (nothing goes to the motors)
+    env_ros; shift
+    A=(); for kv in "$@"; do case $kv in in|out) A+=(-p "lane:=$kv");; *=*) A+=(-p "${kv%%=*}:=${kv#*=}");; esac; done
+    python3 "$TD/day1_teach_node.py" --ros-args "${A[@]}" 2>&1 | tee "$LOG/teach_$(date +%H%M%S).log";;
+  routes) ls -t "$LOG/routes/"*.csv 2>/dev/null | grep -v _raw || echo "no routes yet";;
   bench) python3 "$TD/tools/bench_table.py" "${2:-$LOG/bench.csv}";;
   lightcheck)   # robot does not move: camera on, watch the real light for N s (default 20), camera off
     env_ros; python3 "$ROOT/src/vision/start_light/check_tl_live.py" "${2:-20}";;
@@ -127,8 +136,19 @@ case "${1:-}" in
   run)
     env_ros; shift
     A=(); for kv in "$@"; do
-      case $kv in in|out) A+=(-p "lane:=$kv");; *=*) A+=(-p "${kv%%=*}:=${kv#*=}");; *) echo "★ unknown argument $kv (in|out key=value)"; exit 1;; esac
+      case $kv in
+        in|out) A+=(-p "lane:=$kv");;
+        route=*) r=${kv#*=}; f=$LOG/routes/$r.csv; [ -f "$f" ] || { echo "★ no route $f (day1.sh teach ...)"; exit 1; }
+                 A+=(-p "path_file:=$f");;
+        *=*) A+=(-p "${kv%%=*}:=${kv#*=}");;
+        *) echo "★ unknown argument $kv (in|out key=value)"; exit 1;;
+      esac
     done
+    # a taught route (cones close together): shorter look-ahead and later slow-down unless given (11-19 slalom test)
+    if printf '%s\n' "$@" | grep -q '^route='; then
+      printf '%s\n' "$@" | grep -q '^lookahead=' || A+=(-p lookahead:=0.5)
+      printf '%s\n' "$@" | grep -q '^min_radius=' || A+=(-p min_radius:=0.4)
+    fi
     python3 "$TD/day1_runner_node.py" --ros-args "${A[@]}" 2>&1 | tee "$LOG/run_$(date +%H%M%S).log";;
   test)
     cd "$TD" && python3 sim/eval_vision.py base,glare && python3 sim/sim_day1.py --only lane2,lane1,lane2_place;;
