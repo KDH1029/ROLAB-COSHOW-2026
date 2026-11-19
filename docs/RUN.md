@@ -6,25 +6,30 @@
 
 로봇을 켜고 리모컨으로 일으켜 세운 뒤, 가만히 세워 둔 채로 진행한다.
 
-| 순서 | 명령 | 확인할 것 |
-|---|---|---|
-| 1 | `day1.sh xt16` | XT16 드라이버를 켜고 `/lidar_points` 약 20 Hz |
-| 2 | `day1.sh light` | 내부 PC에서 신호등 YOLO 시작 |
-| 3 | `day1.sh up` | FAST-LIO·브리지·경로 추종기. 끝에 `■ up: odom lio … active`. 로봇이 움직이면 안 됨(IMU 초기화) |
+| 순서 | 별칭 | 명령 | 확인할 것 |
+|---|---|---|---|
+| 1 | `d1xt` | `day1.sh xt16` | XT16 드라이버를 켜고 `/lidar_points` 약 20 Hz |
+| 2 | `d1light` | `day1.sh light` | 내부 PC에서 신호등 YOLO 시작 |
+| 3 | `d1up` | `day1.sh up` | FAST-LIO·브리지·경로 추종기. 끝에 `■ up: odom lio … active`. 로봇이 움직이면 안 됨(IMU 초기화) |
+
+별칭은 `~/.bash_aliases`에 있다(새 터미널이나 `sb` 뒤에 쓸 수 있다). `d1help`로 목록을 본다. 별칭 뒤에 값을 덧붙일 수 있다(예: `d1red debug=true`).
 
 `up`이 `already running`으로 거부하면 다른 스택의 브리지나 FAST-LIO가 같은 ROS 도메인에 떠 있는 것이다. 그것부터 끈다.
 
 ## 2. 회차마다
 
-로봇을 출발 표시에 놓고 실행한다. 한 바퀴를 돌면 저절로 멈춘다. 끝나면 `q`로 주행기를 닫고, 다음 회차는 `run`만 다시 실행한다.
+로봇을 출발 표시에 놓고 실행한다. 한 바퀴를 돌면 저절로 멈춘다. 끝나면 `q`로 주행기를 닫고, 다음 회차는 다시 정렬부터 한다.
 
-| 경기 | 명령 |
-|---|---|
-| 1일차 트랙, 인코스 | `day1.sh run in v=0.8` |
-| 1일차 트랙, 아웃코스 | `day1.sh run out v=0.8` |
-| 미션 코스 (빨강을 받았을 때) | `day1.sh run route=rec105326_lap1 hoop=red v=0.8` |
-| 미션 코스 (노랑을 받았을 때) | `day1.sh run route=rec105326_lap1 hoop=yellow v=0.8` |
-| 미션 코스, 갈래를 미리 정함 (안쪽 / 바깥쪽) | `day1.sh run route=rec105326_lap1 hoop=in v=0.8` / `hoop=out` |
+**미션 코스는 먼저 출발 정렬(`d1align`)을 한다.** 출발 표시는 가르친 경로 출발점에서 왼쪽으로 약 0.2 m 떨어져 있고, 방향도 14° 틀어져 있다. 그대로 출발하면 1 m 앞의 첫 콘에 닿는다(11-19 17:28~17:33 세 번). 정렬은 주행기와 따로 된 프로그램이다. 벽으로 위치를 찾고, 경로 방향으로 제자리에서 돈 뒤 옆걸음으로 경로 위에 올라가서 멈춘다(로봇이 움직인다. 스페이스/x/q = 정지). 끝에 `aligned: lateral … heading …`이 뜨면 바로 주행 명령을 실행한다.
+
+| 경기 | 별칭 | 명령 |
+|---|---|---|
+| 출발 정렬 (미션 코스, 주행 전에) | `d1align` | `day1_align.sh route=rec105326_lap1` |
+| 1일차 트랙, 인코스 | `d1in` | `day1.sh run in v=0.8` |
+| 1일차 트랙, 아웃코스 | `d1out` | `day1.sh run out v=0.8` |
+| 미션 코스 (빨강을 받았을 때) | `d1red` | `day1.sh run route=rec105326_lap1 hoop=red v=0.8` |
+| 미션 코스 (노랑을 받았을 때) | `d1yellow` | `day1.sh run route=rec105326_lap1 hoop=yellow v=0.8` |
+| 미션 코스, 갈래를 미리 정함 (안쪽 / 바깥쪽) | `d1hin` / `d1hout` | `day1.sh run route=rec105326_lap1 hoop=in v=0.8` / `hoop=out` |
 
 - `v`의 상한은 0.8이다(모터 브리지 `max_vx`). 넘게 주면 주행기가 0.8로 낮춘다.
 - `in`·`out`은 1일차 트랙의 레인 선택이다. `route=`를 주면 경로 파일이 길을 정하므로 쓰지 않는다.
