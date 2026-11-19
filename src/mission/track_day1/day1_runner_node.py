@@ -81,6 +81,9 @@ class Day1Runner(Node):
         self.v = float(p('v', 0.5).value)
         self.extra = float(p('extra', 1.2).value)
         self.light = str(p('light', 'model').value)          # model | none (test only)
+        # debug: practice / tests only. Without it (competition) nobody picks the light or the hoop at the look point
+        # by hand: no g / 1 / 2 keys, no light=none. (hoop=in|out, given before the run, is allowed in both)
+        self.debug = str(p('debug', False).value).strip().lower() in ('true', '1', 'yes')
         self.green_s = float(p('green_s', 0.5).value)
         g = str(p('gait', 'classic').value).strip().lower()         # classic | freewalk | trotrun | static | economic | none
         g = {'true': 'classic', '1': 'classic', 'false': 'none', '0': 'none'}.get(g, g)
@@ -110,7 +113,10 @@ class Day1Runner(Node):
         self.path_file = str(p('path_file', '').value)       # '' = rulebook lane centre
         # hula hoop: the colour given before the run; at the zone file's look point the robot stops, faces the hoops,
         # asks the hoop vision once and continues on the route that goes through that colour's hoop
-        self.hoop = str(p('hoop', '').value).strip().lower()      # '' | red | yellow
+        self.hoop = str(p('hoop', '').value).strip().lower()      # '' | red | yellow | in | out
+        if not self.debug:
+            if self.light == 'none':
+                raise SystemExit('light=none needs debug=true (competition: the start must come from the light)')
         self.look_timeout = float(p('look_timeout', 10.0).value)   # s without the hoop vision, then a random branch
         self.light_timeout = float(p('light_timeout', 20.0).value)   # s waiting for GREEN, then go anyway (0 = never)
         self.wait_t = None
@@ -197,9 +203,12 @@ class Day1Runner(Node):
 
         ok, msg = DL.speed_check(self.lane, self.v, self.extra)
         self.get_logger().info(('' if ok else '★ ') + msg)
-        self.get_logger().info('lane %d (%s course, counter-clockwise, one lap + %.1f m) · v %.2f · mode %s · light %s · gait %s'
-                               ' — space/x = STOP, g = 강제 출발(신호등 대기 중), q = quit'
-                               % (self.lane, 'in' if self.lane == 2 else 'out', self.extra, self.v, self.mode, self.light, self.gait_name))
+        self.get_logger().info(('★ DEBUG — g / 1 / 2 keys and light=none allowed (not for the competition)'
+                                if self.debug else 'competition mode — light and hoop only from the vision'))
+        keys = ' — space/x = STOP, q = quit' + (', g = 강제 출발, 1 / 2 = 훌라후프 갈래 (debug)' if self.debug else '')
+        self.get_logger().info('lane %d (%s course, counter-clockwise, one lap + %.1f m) · v %.2f · mode %s · light %s · gait %s%s'
+                               % (self.lane, 'in' if self.lane == 2 else 'out', self.extra, self.v, self.mode, self.light,
+                                  self.gait_name, keys))
         self.bench = dict(lat=[], rp=[], max_vx=None)
         self.cli_bget = self.create_client(GetParameters, self.bridge + '/get_parameters')
         self.ask_bridge_limit()
@@ -865,7 +874,7 @@ class Day1Runner(Node):
                                        throttle_duration_sec=5.0)
             if self.state == 'WAIT' and self.light != 'none' and self.now_s() - self.gate.last_msg > 3.0:
                 self.get_logger().warn('★ 신호등 메시지 없음 (/mission/traffic_light_state) — day1.sh light 로 내부 PC YOLO 를 켰나요? '
-                                       '초록을 봐야만 출발합니다 (g = 강제 출발)', throttle_duration_sec=3.0)
+                                       '초록을 봐야만 출발합니다' + (' (g = 강제 출발)' if self.debug else ''), throttle_duration_sec=3.0)
             lat, s_done = '-', 0.0
             if cur is not None and self.plan is not None:
                 tp = self.track_pose(cur)
@@ -901,6 +910,8 @@ def key_loop(node):
             ch = sys.stdin.read(1)
             if ch in (' ', 'x', 'X'):
                 node.stop('key')
+            elif ch in ('1', '2', 'g', 'G') and not node.debug:
+                node.get_logger().warn('★ key %s ignored — debug=true only (competition: no hand picks)' % ch)
             elif ch in ('1', '2') and node.state == 'LOOK':
                 node.hoop_pick = int(ch) - 1
                 node.get_logger().warn('★ key %s — branch picked by hand' % ch)
