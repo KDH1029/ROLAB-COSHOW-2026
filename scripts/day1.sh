@@ -16,6 +16,7 @@
 #   day1.sh vision push   copy the camera edge node to the internal PC (~/coshow_track)
 #   day1.sh vision start  camera (if not running) + edge node on the internal PC
 #   day1.sh vision snap   camera + bird's-eye check images -> logs/snap/
+#   day1.sh xt16          start the XT16 driver if it is not running, show /lidar_points rate (20 Hz expected)
 #   day1.sh light         start the YOLO traffic-light node (~/junsu_vision on the internal PC)
 #   day1.sh lightcheck [s] watch the real light for s seconds the way the runner does (robot does not move)
 #   day1.sh status        rates of the topics that matter
@@ -122,6 +123,17 @@ case "${1:-}" in
         mkdir -p "$LOG/snap"; rsync -a -e "${SSH[*]}" $ROBOT:coshow_track/snap/ "$LOG/snap/" && ls -t "$LOG/snap" | head -2;;
       *) echo "vision push|start|stop|status|snap";;
     esac;;
+  xt16)   # XT16 driver on this NUC: start it if it is not running (one only), then show the rate
+    env_ros
+    ping -c1 -W1 192.168.123.20 >/dev/null || { echo "★ XT16 192.168.123.20 does not answer — power / cable"; exit 1; }
+    n=$(pgrep -c -x hesai_ros_drive)
+    if [ "$n" = 0 ]; then
+      setsid nohup bash -c "source ~/gosu/env_drive.sh >/dev/null 2>&1; exec ros2 run hesai_ros_driver hesai_ros_driver_node --ros-args -r __ns:=/hesai_ros_driver" \
+        > "$LOG/xt16_$(date +%H%M%S).log" 2>&1 < /dev/null &
+      echo "XT16 driver started"; sleep 5
+    elif [ "$n" -gt 1 ]; then echo "★ $n XT16 drivers running — keep one: pkill -INT -x hesai_ros_drive, then day1.sh xt16"; exit 1
+    else echo "XT16 driver already running"; fi
+    timeout 6 ros2 topic hz /lidar_points --window 20 2>/dev/null | grep -m1 average || echo "★ no /lidar_points — restart: pkill -INT -x hesai_ros_drive; day1.sh xt16";;
   light) "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh start';;
   teach)   # drive one lap with the remote, the lap is saved as a route (nothing goes to the motors)
     env_ros; shift
