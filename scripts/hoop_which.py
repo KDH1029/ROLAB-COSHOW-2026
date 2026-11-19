@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Which arch is red and which is yellow, as the runner sees it: 인코스 = ?, 아웃코스 = ? — debug, robot does not move.
 
-    scripts/hoop_which.sh [seconds=15] [route=rec105326_lap1] [pose=x,y,yaw_deg]          (alias d1which)
+    scripts/hoop_which.sh [seconds=15] [route=rec105326_lap1] [pose=x,y,yaw_deg]          (alias dwhich)
 
-Stand the robot at the look point facing the arches first (d1lookhere, then space + q there: it stays standing and
+Stand the robot at the look point facing the arches first (dlookhere, then space + q there: it stays standing and
 the hula-hoop node is back on). This turns the hoop vision on (/mission/hoop_active, like the runner), and feeds each
 colour's answers to the runner's OWN branch choice (day1_runner_node.Day1Runner.look_decide, the last 5 answers),
 as if hoop=red and as if hoop=yellow. Inner / outer = the branch whose hoop is nearer / farther from the track centre
@@ -115,7 +115,7 @@ class Which(Node):
                 self.pub.publish(Bool(data=False))
             print('── 결과 (%d초, 답 %d개)' % (self.secs, self.n))
             if self.n == 0:
-                print('★ 답 없음: 훌라후프 노드가 꺼졌거나(d1hoopon) 카메라가 꺼짐')
+                print('★ 답 없음: 훌라후프 노드가 꺼졌거나(dhoopon) 카메라가 꺼짐')
             final = {}
             for c, k in (('red', '빨강'), ('yellow', '노랑')):
                 p = self.picks[c]

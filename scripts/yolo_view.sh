@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # YOLO test: the internal PC's camera with every YOLO box drawn, live in a window on the NUC (test only — its own
 # node ~/yolo_test on the internal PC, nothing shared with the traffic-light / hula-hoop nodes). Robot does not move.
-#   yolo_view.sh            hula-hoop engine (tl6_1119: tl_red tl_green rh yh unknown cone)      (alias d1yolo)
+#   yolo_view.sh            hula-hoop engine (tl6_1119: tl_red tl_green rh yh unknown cone)      (alias dyolo)
 #   yolo_view.sh tl         traffic-light engine (tl_cone_1104)
 #   yolo_view.sh <engine>   any engine file on the internal PC
 # Window keys: c capture one full-size frame (on the robot) · r capture every frame on/off · s save the view · q quit.

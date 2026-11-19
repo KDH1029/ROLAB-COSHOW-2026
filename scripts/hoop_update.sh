@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Put the NUC's hula-hoop model (src/vision/start_light/hoop_384x640.onnx, set by `day1.sh hoop use`) on the internal
 # PC and make the node use it. ★ Robot LYING DOWN (the engine build loads the robot's own PC, ~10 min). Run once.
-#   hoop_update.sh            back up the old engine -> push -> stop node -> build FP16 engine -> start node (alias d1hoopup)
+#   hoop_update.sh            back up the old engine -> push -> stop node -> build FP16 engine -> start node (alias dhoopup)
 #   hoop_update.sh rollback   put the backed-up engine back and restart the node (old model, ~10 s, no build)
 # (`day1.sh hoop deploy` leaves an already running node on the OLD engine: it does not restart it.)
 set -uo pipefail

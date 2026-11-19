@@ -241,7 +241,7 @@ class StartAlign(Node):
                 if self.state == 'LOCK':
                     self.start_lock()
             elif t - self.check_t0 > 5.0:
-                self.finish('★ %s — run d1up first (after a robot reboot: d1xt, d1light, d1hoopon, d1up). Nothing moved'
+                self.finish('★ %s — run dup first (after a robot reboot: dxt, dlight, dhoopon, dup). Nothing moved'
                             % ' and '.join(w for w, ok in (('no odom TF (FAST-LIO / odom_tf)', tf_ok),
                                                            ('no motor bridge', br_ok)) if not ok))
             return

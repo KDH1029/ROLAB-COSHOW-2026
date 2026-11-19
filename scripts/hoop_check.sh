@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hula-hoop vision on the real camera, robot does not move: hoop_check.sh [seconds=20]   (alias d1hc)
+# Hula-hoop vision on the real camera, robot does not move: hoop_check.sh [seconds=20]   (alias dhc)
 #   hoop_check.sh engine   the internal PC's FP16 engine vs the labelled pictures (FP32 on the NUC: rh 98-100 %, yh 100 %)
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"

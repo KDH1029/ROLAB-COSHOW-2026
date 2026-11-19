@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Practice: start ANYWHERE on the route (stand on it, facing along it) and stop at the start mark — test only, a fork
 # of the runner (day1.sh run is not changed). Needs `day1.sh up`.  ★ moves the robot: space/x = STOP, q = quit.
-#   practice_run.sh [route=rec105326_lap1] [hoop=in] [v=0.8] [debug=true light=none] [...]      (alias d1here)
+#   practice_run.sh [route=rec105326_lap1] [hoop=in] [v=0.8] [debug=true light=none] [...]      (alias dhere)
 # Defaults: route rec105326_lap1, hoop=in, v=0.8, lookahead 0.5, min_radius 0.4, max_lat 0.5, max_head 30,
 #   debug=true light=none (mid-course the traffic light is not in view: it goes as soon as it has found itself).
 set -uo pipefail

@@ -2,8 +2,8 @@
 # Cones moved, the rest of the course did not: from a short remote drive (start mark -> through the new cones -> out of
 # the cone box), replace only the cone stretch of rec105326_lap1 / lap2 and of the map. Robot not needed (bag replay,
 # isolated: loopback + own domains 83/84). ~5-10 min.
-#   scripts/cone_splice.sh <bag dir>        e.g. ~/bags/gosu_20261120_..._cones2          (alias d1splice)
-# Afterwards: d1edit1 to look (s saves), d1self for the fake-robot check, then real runs.
+#   scripts/cone_splice.sh <bag dir>        e.g. ~/bags/gosu_20261120_..._cones2          (alias dsplice)
+# Afterwards: deditin to look (s saves), dself for the fake-robot check, then real runs.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 BAG=$(readlink -f "${1:?bag dir}"); NAME=$(basename "$BAG")
@@ -20,4 +20,4 @@ echo "4/4 map: cone box replaced (old map kept as maps/coshow_1119_cones0)"
 bash "$ROOT/scripts/map_from_bag.sh" "$BAG" "cones_$NAME" 84 > "$W/map.log" 2>&1 || { tail -5 "$W/map.log"; echo "★ map not patched (routes are done)"; exit 1; }
 python3 "$ROOT/scripts/map_build.py" --clean "$ROOT/maps/cones_$NAME" >> "$W/map.log" 2>&1
 python3 "$ROOT/scripts/cone_splice.py" map "$ROOT/maps/cones_$NAME" || echo "★ map not patched (routes are done)"
-echo "■ done — look: d1edit1 · check: d1self"
+echo "■ done — look: deditin · check: dself"

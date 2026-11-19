@@ -2,9 +2,9 @@
 # Force everything off on the NUC (domain 0 only), also what day1.sh did not start ("already running" from `up`):
 #   runners / align / tools -> motor bridge, RPP, odom TF, FAST-LIO, bridges -> XT16 driver.
 # The robot gets StopMove first. Not touched: ros2 bag record (a recording in progress), other ROS domains (isolated tests).
-#   kill_all.sh          NUC                                                     (alias d1kill)
+#   kill_all.sh          NUC                                                     (alias dkill)
 #   kill_all.sh robot    + the internal PC's traffic-light / hula-hoop / yolo-test nodes and the camera
-# Then: d1xt, d1light, d1hoopon, d1up as usual.
+# Then: dxt, dlight, dhoopon, dup as usual.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 LOG=${DAY1_LOG:-$ROOT/logs/day1}
@@ -40,4 +40,4 @@ if [ "${1:-}" = robot ]; then
     || echo "★ internal PC not reachable"
 fi
 ros2 daemon stop >/dev/null 2>&1
-echo "■ off — left: $(pids | wc -w) process(es). Next: d1xt, d1light, d1hoopon, d1up"
+echo "■ off — left: $(pids | wc -w) process(es). Next: dxt, dlight, dhoopon, dup"

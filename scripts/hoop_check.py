@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hula-hoop vision check on the real camera — the robot does not move.
 
-    scripts/hoop_check.sh [seconds=20]        (alias d1hc)
+    scripts/hoop_check.sh [seconds=20]        (alias dhc)
 
 Turns the hoop node on the way the runner does at the look point (/mission/hoop_active True, re-sent), listens to
 /mission/hoop_state and prints, every second, how many answers came and how often red / yellow were in them
@@ -55,7 +55,7 @@ class HoopCheck(Node):
             n = len(self.rows)
             print('── %d answers in %.0f s (node: 5 Hz expected)' % (n, self.secs))
             if n == 0:
-                print('★ no answer: hoop node not running (d1hoop / day1.sh hoop start) or camera off')
+                print('★ no answer: hoop node not running (dhoop / day1.sh hoop start) or camera off')
             for c in ('red', 'yellow'):
                 hit = [d[c] for d in self.rows if c in d]
                 if hit:

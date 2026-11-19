@@ -2,7 +2,7 @@
 """Practice runner: start ANYWHERE on the route and stop at the route's start (the start mark) — test only, a fork
 (day1_runner_node.py and `day1.sh run` are not changed).
 
-    scripts/practice_run.sh [route=rec105326_lap1] [hoop=in] [v=0.8] [...day1.sh run arguments]   (alias d1here)
+    scripts/practice_run.sh [route=rec105326_lap1] [hoop=in] [v=0.8] [...day1.sh run arguments]   (alias dhere)
 
 e.g. 11-20 practice 1: the cones were moved and not taught yet, so start past the cone field (right side, facing up
 the right wall), drive the rest of the lap (arch, zigzag) and stop at the start mark, before the cones.
