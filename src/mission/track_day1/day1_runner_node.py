@@ -111,6 +111,8 @@ class Day1Runner(Node):
         # asks the hoop vision once and continues on the route that goes through that colour's hoop
         self.hoop = str(p('hoop', '').value).strip().lower()      # '' | red | yellow
         self.look_timeout = float(p('look_timeout', 5.0).value)
+        self.light_timeout = float(p('light_timeout', 20.0).value)   # s waiting for GREEN, then go anyway (0 = never)
+        self.wait_t = None
         if self.mode not in ('wall', 'vision'):
             raise SystemExit('mode must be wall or vision')
 
@@ -234,6 +236,8 @@ class Day1Runner(Node):
 
     def zone_at(self, x, y, margin=0.3):
         for z in self.zones:
+            if 'box' not in z:          # a look point is not a driving zone
+                continue
             b = z['box']
             if b[0] - margin < x < b[2] + margin and b[1] - margin < y < b[3] + margin:
                 return z
@@ -595,7 +599,12 @@ class Day1Runner(Node):
                 fresh = self.last_edge_t is not None and t - self.last_edge_t < self.coast_s
                 self.path.advance(cur[0], cur[1], extend=fresh)
             if self.state == 'WAIT':
+                if self.wait_t is None:
+                    self.wait_t = t
                 go = self.force_go or (self.gate.go(t) if self.light != 'none' else True)
+                if not go and self.light_timeout > 0 and t - self.wait_t > self.light_timeout:
+                    go = True
+                    self.get_logger().warn('★ no GREEN in %.0f s — going anyway' % self.light_timeout)
                 if go:
                     self.state, self.t_go = 'RUN', t
                     self.lap.feed(cur[0], cur[1])
@@ -630,7 +639,12 @@ class Day1Runner(Node):
                 if t - self.cam_pub_t > 1.0:            # light node: judge the light now
                     self.pub_cam.publish(Bool(data=True))
                     self.cam_pub_t = t
+                if self.wait_t is None:
+                    self.wait_t = t
                 go = self.force_go or (self.gate.go(t) if self.light != 'none' else True)
+                if not go and self.light_timeout > 0 and t - self.wait_t > self.light_timeout:
+                    go = True
+                    self.get_logger().warn('★ no GREEN in %.0f s — going anyway' % self.light_timeout)
                 if go:
                     self.state, self.t_go = 'RUN', t
                     self.pub_cam.publish(Bool(data=False))
