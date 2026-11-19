@@ -192,10 +192,10 @@ class FakeWorld(Node):
             self.cmd = (0.0, 0.0, 0.0)
         elif a == 1002:
             self.balanced = True
-        elif a == 2049:
+        elif a in (2049, 2045, 1061, 1062, 1063):     # walking gaits (classic, free, static, trot run, economic)
             r = Response()
             r.header.identity.id = m.header.identity.id
-            r.header.identity.api_id = 2049
+            r.header.identity.api_id = a
             r.header.status.code = 0 if self.balanced else -1     # real Go2: refused unless BalanceStand
             self.walk = self.balanced
             self.pub_resp.publish(r)

@@ -35,7 +35,7 @@ from lifecycle_msgs.srv import ChangeState
 from nav2_msgs.action import FollowPath
 from nav_msgs.msg import Path
 from rcl_interfaces.msg import Parameter as ParamMsg, ParameterType, ParameterValue
-from rcl_interfaces.srv import SetParameters
+from rcl_interfaces.srv import GetParameters, SetParameters
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
@@ -58,6 +58,9 @@ import wall_align as WA  # noqa: E402
 API_BALANCESTAND = 1002
 API_STOPMOVE = 1003
 API_CLASSICWALK = 2049
+# walking gaits (official ros2_sport_client): name -> (api_id, parameter)
+GAITS = {'classic': (2049, '{"data": true}'), 'freewalk': (2045, '{}'), 'trotrun': (1062, '{}'),
+         'static': (1061, '{}'), 'economic': (1063, '{}')}
 
 
 def yaw_of(q):
@@ -78,7 +81,14 @@ class Day1Runner(Node):
         self.extra = float(p('extra', 1.2).value)
         self.light = str(p('light', 'model').value)          # model | none (test only)
         self.green_s = float(p('green_s', 0.5).value)
-        self.gait = bool(p('gait', True).value)
+        g = str(p('gait', 'classic').value).strip().lower()         # classic | freewalk | trotrun | static | economic | none
+        g = {'true': 'classic', '1': 'classic', 'false': 'none', '0': 'none'}.get(g, g)
+        if g != 'none' and g not in GAITS:
+            raise SystemExit('gait must be one of %s or none, got %r' % (', '.join(GAITS), g))
+        self.gait_name = g
+        self.gait = g != 'none'
+        self.gait_api, self.gait_param = GAITS.get(g, (0, '{}'))
+        self.lookahead = float(p('lookahead', 0.0).value)        # m, 0 = keep the yaml (0.8)
         self.init_frames = int(p('init_frames', 3).value)
         self.edges_topic = str(p('edges_topic', '/track/edges').value)
         self.odom_frame = str(p('odom_frame', 'odom').value)
@@ -110,6 +120,7 @@ class Day1Runner(Node):
         self.lock_t0 = None
         self.cam_pub_t = 0.0      # camera_active is re-sent every second (a single message can be lost)
         self.force_go = False     # key g while waiting: start without the light
+        self.last_rot = None
         self.gate = DL.LightGate(need_s=self.green_s)
         self.lap = DL.LapEnd(self.lane, extra=self.extra)
         self.state = 'GAIT' if self.gait else 'LOCK'
@@ -147,7 +158,10 @@ class Day1Runner(Node):
         self.get_logger().info(('' if ok else '★ ') + msg)
         self.get_logger().info('lane %d (%s course, counter-clockwise, one lap + %.1f m) · v %.2f · mode %s · light %s · gait %s'
                                ' — space/x = STOP, g = 강제 출발(신호등 대기 중), q = quit'
-                               % (self.lane, 'in' if self.lane == 2 else 'out', self.extra, self.v, self.mode, self.light, self.gait))
+                               % (self.lane, 'in' if self.lane == 2 else 'out', self.extra, self.v, self.mode, self.light, self.gait_name))
+        self.bench = dict(lat=[], rp=[], max_vx=None)
+        self.cli_bget = self.create_client(GetParameters, self.bridge + '/get_parameters')
+        self.ask_bridge_limit()
         self.set_rpp_speed(self.v)
         if self.mode == 'wall':
             self.get_logger().info('path: %s, %.2f m/lap (rulebook %.2f) · track offset dx %+.3f dy %+.3f m dyaw %+.2f deg'
@@ -172,6 +186,7 @@ class Day1Runner(Node):
             if t_s and abs(Time.from_msg(tr.header.stamp).nanoseconds * 1e-9 - t_s) > 0.3:
                 return None
         tt = tr.transform
+        self.last_rot = tt.rotation
         return tt.translation.x, tt.translation.y, yaw_of(tt.rotation)
 
     def sport(self, api_id, parameter='{}'):
@@ -189,6 +204,9 @@ class Day1Runner(Node):
         req = SetParameters.Request()
         req.parameters = [ParamMsg(name='FollowPath.desired_linear_vel',
                                    value=ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=float(v)))]
+        if self.lookahead > 0:
+            req.parameters.append(ParamMsg(name='FollowPath.lookahead_dist', value=ParameterValue(
+                type=ParameterType.PARAMETER_DOUBLE, double_value=float(self.lookahead))))
         self.cli_param.call_async(req)
 
     def bridge_state(self, activate):
@@ -206,14 +224,35 @@ class Day1Runner(Node):
         self.gate.feed(st, self.now_s())
 
     def cb_resp(self, m):
-        if m.header.identity.api_id == API_CLASSICWALK and self.state == 'GAIT' and self.gait_step == 2:
+        if m.header.identity.api_id == self.gait_api and self.state == 'GAIT' and self.gait_step == 2:
             if m.header.status.code == 0:
-                self.get_logger().info('ClassicWalk OK')
+                self.get_logger().info('gait %s (%d) OK' % (self.gait_name, self.gait_api))
                 self.state = 'LOCK'
                 self.start_lock()
             else:
-                self.get_logger().warn('ClassicWalk refused (code %d) — BalanceStand again' % m.header.status.code)
+                self.get_logger().warn('gait %s refused (code %d) — BalanceStand again' % (self.gait_name, m.header.status.code))
                 self.gait_step = 0
+
+    def ask_bridge_limit(self):
+        """Motor bridge max_vx: it clips vx but not wz, so a v above it over-steers on curves -> RPP speed = min(v, max_vx)."""
+        if not self.cli_bget.wait_for_service(timeout_sec=1.0):
+            self.get_logger().warn('motor bridge parameters not reachable — v %.2f used as is' % self.v)
+            return
+        req = GetParameters.Request()
+        req.names = ['max_vx']
+
+        def done(fut):
+            try:
+                mx = fut.result().values[0].double_value
+            except Exception:
+                return
+            self.bench['max_vx'] = mx
+            if mx > 0 and self.v > mx:
+                self.get_logger().warn('★ v %.2f > bridge max_vx %.2f: the bridge would clip speed but not turning '
+                                       '(over-steer, 11-18) -> v = %.2f. Faster: MAX_VX=... day1.sh up' % (self.v, mx, mx))
+                self.v = mx
+                self.set_rpp_speed(self.v)
+        self.cli_bget.call_async(req).add_done_callback(done)
 
     def start_lock(self):
         self.lock_t0 = self.now_s()
@@ -277,6 +316,28 @@ class Day1Runner(Node):
         except Exception as e:      # a picture must never stop the run
             self.get_logger().warn('plan picture failed: %s' % e)
 
+    def bench_report(self, dist, dur):
+        """One line per run in logs/day1/bench.csv (tools/bench_table.py makes the table)."""
+        lat = np.abs(np.array(self.bench['lat'] or [0.0]))
+        rp = np.degrees(np.array(self.bench['rp'] or [(0.0, 0.0)]))
+        res = self.lock_res or {}
+        row = dict(time=time.strftime('%m-%d %H:%M:%S'), gait=self.gait_name, lane=self.lane, v=self.v,
+                   max_vx=self.bench['max_vx'], lap_s=round(dur, 2), dist_m=round(dist, 2), mean_mps=round(dist / max(dur, 1e-3), 3),
+                   lat_max=round(float(lat.max()), 3), lat_mean=round(float(lat.mean()), 3),
+                   roll_std=round(float(rp[:, 0].std()), 2), pitch_std=round(float(rp[:, 1].std()), 2),
+                   start_lat=round(float(res.get('lateral', 0.0)), 3), start_head=round(math.degrees(res.get('heading_err', 0.0)), 1))
+        self.get_logger().info('BENCH ' + json.dumps(row))
+        try:
+            root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../..'))
+            path = os.path.join(os.environ.get('DAY1_LOG', os.path.join(root, 'logs/day1')), 'bench.csv')
+            new = not os.path.exists(path)
+            with open(path, 'a') as f:
+                if new:
+                    f.write(','.join(row) + '\n')
+                f.write(','.join(str(v) for v in row.values()) + '\n')
+        except Exception as e:
+            self.get_logger().warn('bench.csv: %s' % e)
+
     def track_pose(self, cur):
         return TP.compose(self.T_to, cur)
 
@@ -335,16 +396,16 @@ class Day1Runner(Node):
             if self.gait_step == 0:
                 self.gait_tries += 1
                 if self.gait_tries > 3:
-                    self.get_logger().error('ClassicWalk refused 3 times — stopping (yaw trim is for ClassicWalk)')
+                    self.get_logger().error('gait %s refused 3 times — stopping' % self.gait_name)
                     self.state = 'STOP'
                     return
                 self.sport(API_BALANCESTAND)
                 self.gait_step, self.gait_t = 1, t
             elif self.gait_step == 1:
-                self.sport(API_CLASSICWALK, '{"data": true}')
+                self.sport(self.gait_api, self.gait_param)
                 self.gait_step, self.gait_t = 2, t
             elif self.gait_step == 2 and t - self.gait_t > 1.5:
-                self.get_logger().warn('no ClassicWalk response — retry')
+                self.get_logger().warn('no %s response — retry' % self.gait_name)
                 self.gait_step = 0
             return
         cur = self.pose_at(None)
@@ -403,10 +464,16 @@ class Day1Runner(Node):
                     self.pub_cam.publish(Bool(data=False))   # light no longer needed (repeat: one can be lost)
                     self.cam_pub_t = t
                 s_r = self.prog.feed(tp[0], tp[1])
+                if self.state == 'RUN' and s_r - self.plan.s_start > 2.5 and self.last_rot is not None:   # past the blend
+                    self.bench['lat'].append(TP.lateral_of(self.loop, tp[0], tp[1])[0])
+                    q = self.last_rot
+                    self.bench['rp'].append((math.atan2(2 * (q.w * q.x + q.y * q.z), 1 - 2 * (q.x * q.x + q.y * q.y)),
+                                             math.asin(max(-1.0, min(1.0, 2 * (q.w * q.y - q.z * q.x))))))
                 if self.state == 'RUN' and self.plan.s_end - s_r < 0.25:
                     self.state = 'FINISH'
                     self.get_logger().info('lap done: %.2f m along the lane in %.1f s'
                                            % (s_r - self.plan.s_start, t - self.t_go))
+                    self.bench_report(s_r - self.plan.s_start, t - self.t_go)
             else:
                 s_r = self.prog.s
             pts = TP.apply(self.T_ot, self.plan.points(s_r - 0.3))

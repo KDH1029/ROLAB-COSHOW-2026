@@ -3,13 +3,15 @@
 #   day1.sh up            FAST-LIO (imu/cloud bridge + fastlio_mapping, no map) -> odom TF + motor bridge
 #                         (min_wz/min_vy 0, inactive) + Nav2 controller_server(RPP).  ★ robot standing still (IMU init)
 #                         ODOM=builtin: built-in odometry x1.189 instead (vision spare), ODOM=fake: test only
+#                         MAX_VX=0.8 bridge forward-speed limit (the runner lowers v to it), TRIM=0 no ClassicWalk yaw trim
+#   day1.sh bench         table of logs/day1/bench.csv (one line per finished run: gait, v, lap time, lateral, roll/pitch)
 #   day1.sh vision push   copy the camera edge node to the internal PC (~/coshow_track)
 #   day1.sh vision start  camera (if not running) + edge node on the internal PC
 #   day1.sh vision snap   camera + bird's-eye check images -> logs/snap/
 #   day1.sh light         start the YOLO traffic-light node (~/junsu_vision on the internal PC)
 #   day1.sh lightcheck [s] watch the real light for s seconds the way the runner does (robot does not move)
 #   day1.sh status        rates of the topics that matter
-#   day1.sh run in|out [v=0.5] [light=none] [extra=1.2] [track_dx=0 track_dy=0 track_dyaw_deg=0] [path_file=pins.csv]
+#   day1.sh run in|out [v=0.5] [gait=classic|freewalk|trotrun|static|economic] [lookahead=0.8] [light=none] [extra=1.2] [track_dx=0 track_dy=0 track_dyaw_deg=0] [path_file=pins.csv]
 #                         in = inner lane (2), out = outer lane (1); one counter-clockwise lap, then stop.
 #                         ★ stand the robot on its start mark first; space/x = STOP
 #   day1.sh down          stop what `up` started
@@ -77,8 +79,9 @@ case "${1:-}" in
       *) echo "ODOM=lio|builtin|fake"; exit 1;;
     esac
     bg odom_tf ros2 run go2_bridge odom_tf_node --ros-args -r __node:=go2_odom_tf --params-file "$BP" "${OT[@]}"
+    TR=(); [ "${TRIM:-1}" = 0 ] && TR=(-p yaw_trim_per_vx:=0.0 -p yaw_trim_bias:=0.0)   # trim was measured for ClassicWalk
     bg bridge ros2 run go2_bridge cmd_vel_to_sport_node --ros-args -r __node:=go2_cmd_vel_to_sport --params-file "$BP" \
-      -p min_wz:=0.0 -p min_vy:=0.0
+      -p min_wz:=0.0 -p min_vy:=0.0 -p max_vx:=${MAX_VX:-0.8} "${TR[@]}"
     lc /go2_odom_tf configure && lc /go2_odom_tf activate
     lc /go2_cmd_vel_to_sport configure    # activated by the runner once the lane is found
     # the local costmap needs odom -> base_link before it configures (built-in odometry must be flowing)
@@ -112,6 +115,7 @@ case "${1:-}" in
       *) echo "vision push|start|stop|status|snap";;
     esac;;
   light) "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh start';;
+  bench) python3 "$TD/tools/bench_table.py" "${2:-$LOG/bench.csv}";;
   lightcheck)   # robot does not move: camera on, watch the real light for N s (default 20), camera off
     env_ros; python3 "$ROOT/src/vision/start_light/check_tl_live.py" "${2:-20}";;
   status)
