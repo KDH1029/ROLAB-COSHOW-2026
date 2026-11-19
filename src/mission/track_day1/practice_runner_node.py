@@ -7,8 +7,12 @@
 e.g. 11-20 practice 1: the cones were moved and not taught yet, so start past the cone field (right side, facing up
 the right wall), drive the rest of the lap (arch, zigzag) and stop at the start mark, before the cones.
 Differences from the runner:
-  - start lock: no '1 m from the route start' rule; the 180 deg wall twin is the one that puts the robot on the route
-    (smallest lateral + heading error), not the one nearest the route start; limits max_lat 0.5 m / max_head 30 deg
+  - start lock: no '1 m from the route start' rule; limits max_lat 0.5 m / max_head 30 deg. The walls alone cannot
+    tell the two 180 deg twins apart, and this route is nearly point-symmetric (up the right wall ~ down the left
+    one), so the twin is the one whose scan lands on the MAP's inside structures (zigzag walls, arch posts, cones),
+    not on the walls: fraction of inside scan points within 0.12 m of a map cell. Neither twin on the map = the wall
+    fit is wrong there: it does not start and says so (11-19 bag: start mark 93 vs 2 %, past the cones 94 vs 9 %,
+    right in front of the zigzag the wall fit is 1.9 m off — 1 m further back it is fine, 85 vs 4 %)
   - lap end: at the route's start station + end_extra (0 m) instead of one lap + extra
   - zigzag_v=<m/s>: the zigzag zone's speed for this run only (the zones file keeps its 0.4)
 Everything else (light, zones, hula hoop, keys, debug) is the runner's.
@@ -21,23 +25,75 @@ import time
 
 import numpy as np
 import rclpy
+from scipy.spatial import cKDTree
+from sensor_msgs_py import point_cloud2 as pc2
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.executors import ExternalShutdownException
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import day1_runner_node as R  # noqa: E402
 import track_path as TP  # noqa: E402
+import wall_align as WA  # noqa: E402
+
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+
+
+def map_inside_tree(d, margin=0.4):
+    """KD-tree of the map's occupied cells away from the arena walls (the asymmetric structures)."""
+    y = {}
+    for line in open(os.path.join(d, 'map.yaml')):
+        if ':' in line and not line.startswith('#'):
+            k, v = line.split(':', 1)
+            y[k.strip()] = v.split('#')[0].strip()
+    raw = open(os.path.join(d, y['image']), 'rb').read().split(b'\n', 3)
+    w, h = map(int, raw[1].split())
+    occ = np.frombuffer(raw[3], np.uint8)[:w * h].reshape(h, w)[::-1] < 100
+    org = [float(v) for v in y['origin'].strip('[]').split(',')]
+    res = float(y['resolution'])
+    jj, ii = np.nonzero(occ)
+    M = np.column_stack([org[0] + (ii + 0.5) * res, org[1] + (jj + 0.5) * res])
+    M = M[(np.abs(M[:, 0]) < 4.5 - margin) & (np.abs(M[:, 1]) < 3.5 - margin)]
+    return cKDTree(M) if len(M) > 20 else None
 
 
 class AnyStartLock(TP.StartLock):
-    """StartLock without the 'near the route start' rule; twin = the one that lies on the route."""
+    """StartLock without the 'near the route start' rule; twin by the map (inside structures), else the route fit."""
+    scan = None        # (N, 3) base_link points of the latest frame (set by the runner)
+    mtree = None       # map_inside_tree
+    twin_info = ''
 
-    def fit(self, tw):
+    def map_score(self, tw):
+        if self.scan is None or self.mtree is None:
+            return None
         q = TP.compose(self.off_inv, tw)
-        lat, _, s = TP.lateral_of(self.loop, q[0], q[1])
-        a, b = self.loop.pose_at(s), self.loop.pose_at(s + 0.5)
-        head = TP.wrap(q[2] - math.atan2(b[1] - a[1], b[0] - a[0]))
-        return abs(lat) + 0.5 * abs(head)
+        P = self.scan
+        r = np.hypot(P[:, 0], P[:, 1])
+        P = P[(P[:, 2] > -0.15) & (P[:, 2] < 0.6) & (r > 0.5) & (r < 6.0)]
+        c, s = math.cos(q[2]), math.sin(q[2])
+        X = q[0] + c * P[:, 0] - s * P[:, 1]
+        Y = q[1] + s * P[:, 0] + c * P[:, 1]
+        inside = (np.abs(X) < 4.1) & (np.abs(Y) < 3.1)
+        if inside.sum() < 30:
+            return 0.0
+        d = self.mtree.query(np.column_stack([X[inside], Y[inside]]), distance_upper_bound=0.2)[0]
+        return float((d < 0.12).mean())
+
+    def pick_twin(self, tw, twin):
+        """(chosen, None) or (None, why). With a map: only the map decides — if neither twin lands on the map's inside
+        structures, the wall fit itself is off (11-19 bag: right in front of the zigzag the corridor walls pass for arena
+        walls, 1.9 m wrong) and nothing is accepted. Without a map: the route fit, only if clear-cut."""
+        a, b = self.map_score(tw), self.map_score(twin)
+        fa, fb = self.fit(tw), self.fit(twin)
+        if a is not None:
+            self.twin_info = 'map match %.0f %% vs %.0f %% (twin)' % (100 * max(a, b), 100 * min(a, b))
+            if max(a, b) >= 0.25 and abs(a - b) >= 0.15:
+                return (tw if a > b else twin), None
+            return None, ('the walls do not match the map here (%s): the wall fit is off — put it ~1 m further back '
+                          'along the route, away from the zigzag walls' % self.twin_info)
+        self.twin_info = 'no map: route fit %.2f vs %.2f' % (min(fa, fb), max(fa, fb))
+        if abs(fa - fb) >= 0.3:
+            return (tw if fa < fb else twin), None
+        return None, 'twin ambiguous (%s) — stand closer to the route' % self.twin_info
 
     def feed(self, wall, odom):
         if not wall.get('ok'):
@@ -46,8 +102,10 @@ class AnyStartLock(TP.StartLock):
         tw = (wall['x'], wall['y'], wall['yaw'])
         twin = (-tw[0], -tw[1], TP.wrap(tw[2] + math.pi))
         if not self.buf:
-            if self.fit(twin) < self.fit(tw):
-                tw = twin
+            tw, why = self.pick_twin(tw, twin)
+            if tw is None:
+                self.why = why
+                return None
         else:
             p = self.buf[0][1]
             if math.hypot(tw[0] - p[0], tw[1] - p[1]) > math.hypot(twin[0] - p[0], twin[1] - p[1]):
@@ -91,6 +149,11 @@ class PracticeRunner(R.Day1Runner):
             raise SystemExit('practice runner: a route is needed (route=<name>)')
         self.wlock = AnyStartLock(self.lane, n=self.lock_n, max_lat=self.max_lat, max_head_deg=self.max_head,
                                   loop=self.loop, offset=self.track_off)
+        mapd = str(p('lock_map', os.path.join(ROOT, 'maps', 'coshow_1119')))
+        try:
+            self.wlock.mtree = map_inside_tree(mapd)
+        except Exception as e:
+            self.get_logger().warn('★ lock map %s not loaded (%s) — twin by the route fit only' % (mapd, e))
         self.end_set = False
         self.get_logger().info('★ PRACTICE: start anywhere on %s, stop at its start (+%.1f m)'
                                % (os.path.basename(self.path_file), self.end_extra))
@@ -103,6 +166,8 @@ class PracticeRunner(R.Day1Runner):
                     self.get_logger().info('★ PRACTICE: zigzag v %.2f for this run (zones file unchanged)' % self.zigzag_v)
 
     def cb_lidar(self, m):
+        if self.state == 'LOCK' and self.plan is None and self.n_frames % 2 == 1:     # the frame the runner will use
+            self.wlock.scan = WA.lidar_to_base(pc2.read_points_numpy(m, field_names=('x', 'y', 'z'), skip_nans=True))
         super().cb_lidar(m)
         if self.plan is not None and not self.end_set:
             with self.lock:
@@ -113,8 +178,8 @@ class PracticeRunner(R.Day1Runner):
                     to_start += L
                 self.plan.s_end = s0 + to_start + self.end_extra
                 self.end_set = True
-            self.get_logger().info('★ PRACTICE: from station %.1f m, stop at the route start: %.1f m to drive'
-                                   % (s0 % L, self.plan.s_end - s0))
+            self.get_logger().info('★ PRACTICE: from station %.1f m, stop at the route start: %.1f m to drive · twin: %s'
+                                   % (s0 % L, self.plan.s_end - s0, self.wlock.twin_info))
 
     def look_switch(self, name, why, s_r):
         end_left = self.plan.s_end - s_r
