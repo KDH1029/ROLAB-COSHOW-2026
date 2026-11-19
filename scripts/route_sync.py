@@ -70,8 +70,8 @@ def main():
     moved = [float(np.hypot(*(np.array(ln.pose_at(s)[:2]) - p))) for s, p in ((sa, pa), (sb, pb))]
     st = np.array([ln.station(x, y) for x, y in E_new])
     st[0] = 0.0
-    before = E_new[st <= sa + 1e-6]
-    after = E_new[st >= sb - 1e-6]
+    before = E_new[st <= sa + 0.02]     # pins are >= 0.25 m apart: 2 cm keeps the parting / joining pin itself
+    after = E_new[st >= sb - 0.02]
     if sb < sa:
         sys.exit('the parting point comes after the joining point on the edited route — edited across the branch?')
     P = np.vstack([before, O[k0:k1 + 1], after])

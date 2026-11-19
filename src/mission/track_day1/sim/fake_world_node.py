@@ -24,7 +24,7 @@ from rcl_interfaces.msg import ParameterDescriptor
 from nav_msgs.msg import Odometry, Path
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from unitree_api.msg import Request, Response
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -57,6 +57,16 @@ class FakeWorld(Node):
         self.lio_yaw_drift = math.radians(float(p('lio_yaw_drift_dps', 0.03).value))
         self.light_on = bool(p('light_on', True).value)      # false: no light messages at all (runner must wait)
         self.path_check = None                              # the runner's path vs the true lane centre
+        # fake hula-hoop vision: hoop_red_at / hoop_yellow_at = 'x,y' (track frame), hoop_mode bearing | side | none
+        self.hoops = {}
+        for c in ('red', 'yellow'):
+            v = str(p('hoop_%s_at' % c, '').value)
+            if v:
+                self.hoops[c] = [float(t) for t in v.split(',')]
+        self.hoop_mode = str(p('hoop_mode', 'bearing').value)
+        self.hoop_on = False
+        self.hoop_asked = 0
+        self.trail = []                                     # truth path (for the route-following check)
         self.R = T.R_CENTER[self.lane]
         self.lap = T.LAP_LEN[self.lane]
         self.x, self.y, self.yaw = pose_at_s(s0 - 0.30, self.R, off0)
@@ -93,6 +103,9 @@ class FakeWorld(Node):
         self.pub_light = self.create_publisher(String, '/mission/traffic_light_state', 10)
         self.create_subscription(String, '/track/status', self.cb_status, 5)
         self.create_subscription(Path, '/track/path', self.cb_path, 2)
+        self.create_subscription(Bool, '/mission/hoop_active', self.cb_hoop_on, 5)
+        self.pub_hoop = self.create_publisher(String, '/mission/hoop_state', 10)
+        self.create_timer(0.1, self.hoop_vision)
         self.runner_state = ''
         self.create_timer(0.02, self.step)
         self.create_timer(0.1, self.light)
@@ -180,6 +193,25 @@ class FakeWorld(Node):
                                path_rms_cm=round(100 * float(np.sqrt(((Q - C) ** 2).sum(1).mean())), 2),
                                path_len_m=round(float(np.hypot(*np.diff(P, axis=0).T).sum()), 2))
 
+    def cb_hoop_on(self, m):
+        if m.data and not self.hoop_on:
+            self.hoop_asked += 1
+        self.hoop_on = bool(m.data)
+
+    def hoop_vision(self):
+        if not self.hoop_on or not self.hoops or self.hoop_mode == 'none':
+            return
+        with self.lock:
+            x, y, yaw = self.x, self.y, self.yaw
+        b = {c: math.degrees(math.atan2(math.sin(math.atan2(h[1] - y, h[0] - x) - yaw), math.cos(math.atan2(h[1] - y, h[0] - x) - yaw)))
+             for c, h in self.hoops.items()}
+        if self.hoop_mode == 'side' and len(b) == 2:
+            hi = max(b, key=b.get)
+            out = {c: {'side': 'left' if c == hi else 'right', 'conf': 0.9} for c in b}
+        else:
+            out = {c: {'bearing_deg': round(v + self.rng.normal(0, 1.0), 2), 'conf': 0.9} for c, v in b.items()}
+        self.pub_hoop.publish(String(data=json.dumps(out)))
+
     def cb_req(self, m):
         a = m.header.identity.api_id
         if self.t_first_req is None:
@@ -229,6 +261,8 @@ class FakeWorld(Node):
             self.oy += (math.sin(self.oyaw) * dxb + math.cos(self.oyaw) * dyb) * k
             self.oyaw += dth + 0.002 * dt
             # truth
+            if not self.trail or math.hypot(self.x - self.trail[-1][0], self.y - self.trail[-1][1]) > 0.05:
+                self.trail.append((self.x, self.y))
             s_now = track_s(self.x, self.y, self.R)
             ds = s_now - self.s_prev
             ds += self.lap if ds < -self.lap / 2 else (-self.lap if ds > self.lap / 2 else 0)
@@ -295,6 +329,10 @@ class FakeWorld(Node):
         d = dict(lap_s=lap, margin_cm=round(self.min_margin * 100, 1), viol=self.viol,
                  overshoot_m=round(self.prog - self.need, 2), runner=self.runner_state, moved_m=round(self.prog, 2))
         d.update(self.path_check or {})
+        d['hoop_asked'] = self.hoop_asked
+        tf = os.environ.get('FAKE_TRAIL')
+        if tf:
+            np.savetxt(tf, np.array(self.trail), delimiter=',', fmt='%.4f', header='x_m,y_m', comments='')
         return d
 
 
