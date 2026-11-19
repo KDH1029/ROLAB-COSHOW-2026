@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Make two routes identical where they run together (the shared stretches become one common line).
 
-    python3 scripts/route_merge.py <A.csv> <B.csv> [thr=0.25] [blend=0.6] [map=maps/coshow_1119] [png=out.png]
+    python3 scripts/route_merge.py <A.csv> <B.csv> [thr=0.25] [blend=0.6] [pin=0.6] [map=maps/coshow_1119] [png=out.png]
 
 Shared = A's points within `thr` of B. There the common line is the midpoint of A and B; both routes get exactly the
-same pins on it (0.25 m apart). Where they part, each eases from the common line onto its own over `blend` metres.
+same pins on it (`pin` m apart, default 0.6). Where they part, each eases from the common line onto its own over `blend` metres.
 Both files are rewritten (old ones kept as .bak_HHMMSS.csv); pin 1 (the start) stays on the common line.
 """
 import os
@@ -45,6 +45,7 @@ def main():
     pa, pb = sys.argv[1], sys.argv[2]
     kv = dict(a.split('=', 1) for a in sys.argv[3:])
     thr, blend, ds = float(kv.get('thr', 0.25)), float(kv.get('blend', 0.6)), 0.05
+    pin = float(kv.get('pin', 0.6))
     lane_a, A = load(pa)
     lane_b, B = load(pb)
     s1 = np.arange(0.0, A.length, ds)
@@ -87,7 +88,7 @@ def main():
     # B: the same common pins where w == 0; its own line in its parted stretches; the same easing
     core = w == 0
     pinsA, pinsB = [], []
-    step = int(round(0.25 / ds))
+    step = int(round(pin / ds))
     k = 0
     while k < len(s1):
         if core[k]:
@@ -106,7 +107,7 @@ def main():
             # B over the same stretch: from its point at s2[k] to s2[j-1], along B, eased to C at both ends
             sb0, sb1 = s2[k], s2[j - 1] if j - 1 < len(s1) else s2[-1]
             span = (sb1 - sb0) % B.length
-            nb = max(2, int(round(span / 0.25)))
+            nb = max(2, int(round(span / pin)))
             for t in np.linspace(0.0, 1.0, nb, endpoint=False):
                 sb = sb0 + t * span
                 q = np.array(B.pose_at(sb)[:2])
