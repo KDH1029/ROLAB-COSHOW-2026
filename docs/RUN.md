@@ -22,10 +22,11 @@
 |---|---|
 | 1일차 트랙, 인코스 | `day1.sh run in v=0.8` |
 | 1일차 트랙, 아웃코스 | `day1.sh run out v=0.8` |
-| 미션 코스 (빨강을 받았을 때) | `day1.sh run out route=rec105326_lap1 hoop=red v=0.4` |
-| 미션 코스 (노랑을 받았을 때) | `day1.sh run out route=rec105326_lap1 hoop=yellow v=0.4` |
+| 미션 코스 (빨강을 받았을 때) | `day1.sh run route=rec105326_lap1 hoop=red v=0.4` |
+| 미션 코스 (노랑을 받았을 때) | `day1.sh run route=rec105326_lap1 hoop=yellow v=0.4` |
 
 - `v`의 상한은 0.8이다(모터 브리지 `max_vx`). 넘게 주면 주행기가 0.8로 낮춘다.
+- `in`·`out`은 1일차 트랙의 레인 선택이다. `route=`를 주면 경로 파일이 길을 정하므로 쓰지 않는다.
 - 미션 코스는 녹화 105326을 시작한 출발 표시에서 출발한다. 경로 출발점에서 1 m 넘게 떨어져 있으면 출발을 거부한다.
 
 ### 주행기 흐름
