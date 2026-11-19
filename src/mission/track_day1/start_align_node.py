@@ -141,7 +141,8 @@ class StartAlign(Node):
         self.create_subscription(Response, '/api/sport/response', self.cb_resp, 10)
         self.cli_bridge = self.create_client(ChangeState, self.bridge + '/change_state')
         self.req_id = int(time.time() * 1000) % 1000000000
-        self.state = 'GAIT' if self.gait else 'LOCK'
+        self.state = 'CHECK'          # the stack first (odom TF + motor bridge): nothing is sent to the robot before
+        self.check_t0 = None
         self.gait_step, self.gait_t, self.gait_tries = 0, 0.0, 0
         self.sub_lidar = None
         self.n_frames = 0
@@ -150,8 +151,6 @@ class StartAlign(Node):
         self.done = False
         self.create_timer(0.05, self.tick)
         self.get_logger().info('start align on %s (%.2f m/lap) — space/x/q = stop' % (os.path.basename(path), self.loop.length))
-        if self.state == 'LOCK':
-            self.start_lock()
 
     def now_s(self):
         return self.get_clock().now().nanoseconds * 1e-9
@@ -231,6 +230,21 @@ class StartAlign(Node):
         if self.done:
             return
         t = self.now_s()
+        if self.state == 'CHECK':
+            if self.check_t0 is None:
+                self.check_t0 = t
+            tf_ok = self.pose_at() is not None
+            br_ok = self.cli_bridge.service_is_ready()
+            if tf_ok and br_ok:
+                self.get_logger().info('stack OK (odom TF, motor bridge)')
+                self.state = 'GAIT' if self.gait else 'LOCK'
+                if self.state == 'LOCK':
+                    self.start_lock()
+            elif t - self.check_t0 > 5.0:
+                self.finish('★ %s — run d1up first (after a robot reboot: d1xt, d1light, d1hoopon, d1up). Nothing moved'
+                            % ' and '.join(w for w, ok in (('no odom TF (FAST-LIO / odom_tf)', tf_ok),
+                                                           ('no motor bridge', br_ok)) if not ok))
+            return
         if self.state == 'GAIT':
             if t - self.gait_t < 0.5:
                 return
