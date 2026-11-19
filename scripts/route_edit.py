@@ -251,6 +251,16 @@ def main():
     if os.environ.get('ROUTE_EDIT_SELFTEST'):
         fig.savefig(os.environ['ROUTE_EDIT_SELFTEST'], dpi=80)
         return
+    try:   # in front of the other windows (it used to open behind the app), large
+        w = fig.canvas.manager.window
+        w.attributes('-zoomed', True)
+        w.lift()
+        w.attributes('-topmost', True)
+        w.after(2000, lambda: w.attributes('-topmost', False))
+        w.focus_force()
+    except Exception:
+        pass
+    print('editor window open — close it (or q) to finish', flush=True)
     plt.show()
 
 
