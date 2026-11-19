@@ -10,6 +10,7 @@ Differences from the runner:
   - start lock: no '1 m from the route start' rule; the 180 deg wall twin is the one that puts the robot on the route
     (smallest lateral + heading error), not the one nearest the route start; limits max_lat 0.5 m / max_head 30 deg
   - lap end: at the route's start station + end_extra (0 m) instead of one lap + extra
+  - zigzag_v=<m/s>: the zigzag zone's speed for this run only (the zones file keeps its 0.4)
 Everything else (light, zones, hula hoop, keys, debug) is the runner's.
 """
 import math
@@ -84,6 +85,8 @@ class PracticeRunner(R.Day1Runner):
         def p(name, default):
             return self.declare_parameter(name, default, ParameterDescriptor(dynamic_typing=True)).value
         self.end_extra = float(p('end_extra', 0.0))
+        self.zigzag_v = float(p('zigzag_v', 0.0))         # 0 = the zones file's value
+        self.zone_override()
         if self.mode != 'wall' or not self.path_file:
             raise SystemExit('practice runner: a route is needed (route=<name>)')
         self.wlock = AnyStartLock(self.lane, n=self.lock_n, max_lat=self.max_lat, max_head_deg=self.max_head,
@@ -91,6 +94,13 @@ class PracticeRunner(R.Day1Runner):
         self.end_set = False
         self.get_logger().info('★ PRACTICE: start anywhere on %s, stop at its start (+%.1f m)'
                                % (os.path.basename(self.path_file), self.end_extra))
+
+    def zone_override(self):
+        if self.zigzag_v > 0:
+            for z in self.zones:
+                if z.get('name') == 'zigzag':
+                    z['v'] = self.zigzag_v
+                    self.get_logger().info('★ PRACTICE: zigzag v %.2f for this run (zones file unchanged)' % self.zigzag_v)
 
     def cb_lidar(self, m):
         super().cb_lidar(m)
@@ -109,6 +119,7 @@ class PracticeRunner(R.Day1Runner):
     def look_switch(self, name, why, s_r):
         end_left = self.plan.s_end - s_r
         super().look_switch(name, why, s_r)
+        self.zone_override()                         # the new branch's zones were read from its file
         if self.plan is not None and self.end_set:   # new branch: still stop at the start (same distance to go)
             sn = self.prog.s
             L = self.loop.length
