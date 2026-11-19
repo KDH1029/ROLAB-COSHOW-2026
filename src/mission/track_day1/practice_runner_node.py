@@ -15,6 +15,8 @@ Differences from the runner:
     right in front of the zigzag the wall fit is 1.9 m off — 1 m further back it is fine, 85 vs 4 %)
   - lap end: at the route's start station + end_extra (0 m) instead of one lap + extra
   - zigzag_v=<m/s>: the zigzag zone's speed for this run only (the zones file keeps its 0.4)
+  - lock=auto (default): the position kept by dkeep (track_keep_node, from the start mark) if it is from this FAST-LIO
+    run and < 15 min old, else the wall fit; lock=keep / lock=walls to force one
 Everything else (light, zones, hula hoop, keys, debug) is the runner's.
 """
 import math
@@ -171,26 +173,20 @@ class PracticeRunner(R.Day1Runner):
             raise SystemExit('practice runner: a route is needed (route=<name>)')
         self.wlock = AnyStartLock(self.lane, n=self.lock_n, max_lat=self.max_lat, max_head_deg=self.max_head,
                                   loop=self.loop, offset=self.track_off)
-        if str(p('lock', 'walls')).strip().lower() == 'keep':
-            import json
-            f = os.path.join(os.environ.get('DAY1_LOG', os.path.join(ROOT, 'logs', 'day1')), 'track_keep.json')
-            if not os.path.exists(f):
-                raise SystemExit('lock=keep: no %s — run dkeep on the start mark first' % f)
-            k = json.load(open(f))
-            try:
-                pid = int(open(os.path.join(os.path.dirname(f), 'fastlio.pid')).read().strip())
-            except Exception:
-                pid = None
-            if pid is None or pid != k.get('fastlio_pid'):
-                raise SystemExit('lock=keep: the kept position belongs to another FAST-LIO run (pid %s, now %s) — '
-                                 'dkeep again on the start mark' % (k.get('fastlio_pid'), pid))
-            age = time.time() - k['time']
-            info = 'kept by dkeep %.0f s ago (FAST-LIO pid %s)' % (age, pid)
-            if age > 900:
-                self.get_logger().warn('★ the kept position is %.0f min old — FAST-LIO drifts (~4 cm / 4 min): dkeep again?' % (age / 60))
-            self.wlock = KeptLock(k['T_track_odom'], info, self.lane, n=1, max_lat=self.max_lat,
-                                  max_head_deg=self.max_head, loop=self.loop, offset=self.track_off)
-            self.get_logger().info('★ PRACTICE: lock=keep — ' + info)
+        # lock: auto (default) = the position kept by dkeep if it is from this FAST-LIO run and < 15 min old, else walls
+        #       keep = only the kept one (refuse otherwise) · walls = wall fit + map twin check
+        mode = str(p('lock', 'auto')).strip().lower()
+        if mode in ('auto', 'keep'):
+            kept, why = self.kept()
+            if kept is not None:
+                T, info = kept
+                self.wlock = KeptLock(T, info, self.lane, n=1, max_lat=self.max_lat, max_head_deg=self.max_head,
+                                      loop=self.loop, offset=self.track_off)
+                self.get_logger().info('★ PRACTICE: position kept by dkeep — ' + info)
+            elif mode == 'keep':
+                raise SystemExit('lock=keep: ' + why)
+            else:
+                self.get_logger().info('★ PRACTICE: walls (%s)' % why)
         mapd = str(p('lock_map', os.path.join(ROOT, 'maps', 'coshow_1119')))
         try:
             if isinstance(self.wlock, AnyStartLock):
@@ -200,6 +196,24 @@ class PracticeRunner(R.Day1Runner):
         self.end_set = False
         self.get_logger().info('★ PRACTICE: start anywhere on %s, stop at its start (+%.1f m)'
                                % (os.path.basename(self.path_file), self.end_extra))
+
+    def kept(self):
+        """((T, info), '') from logs/day1/track_keep.json, or (None, why not)."""
+        import json
+        f = os.path.join(os.environ.get('DAY1_LOG', os.path.join(ROOT, 'logs', 'day1')), 'track_keep.json')
+        if not os.path.exists(f):
+            return None, 'no kept position (dkeep on the start mark keeps one)'
+        k = json.load(open(f))
+        try:
+            pid = int(open(os.path.join(os.path.dirname(f), 'fastlio.pid')).read().strip())
+        except Exception:
+            pid = None
+        if pid is None or pid != k.get('fastlio_pid'):
+            return None, 'the kept position is from another FAST-LIO run (pid %s, now %s) — dkeep again' % (k.get('fastlio_pid'), pid)
+        age = time.time() - k['time']
+        if age > 900:
+            return None, 'the kept position is %.0f min old (FAST-LIO drifts) — dkeep again' % (age / 60)
+        return (k['T_track_odom'], 'kept %.0f s ago, FAST-LIO pid %s' % (age, pid)), ''
 
     def zone_override(self):
         if self.zigzag_v > 0:

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Keep the track position from the start mark (robot standing on it, `dup` running): track_keep.sh [route=...] (alias dkeep)
-# Then walk the robot anywhere with the remote and start practice runs with: dhere lock=keep
+# Then walk the robot anywhere with the remote; dhere uses it (this window may be closed)
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 set +u; source /opt/ros/jazzy/setup.bash; source ~/unitree_ros2/cyclonedds_ws/install/setup.bash >/dev/null 2>&1

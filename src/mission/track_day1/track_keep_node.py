@@ -116,7 +116,7 @@ class Keep(Node):
         ts.transform.rotation.z, ts.transform.rotation.w = math.sin(self.T[2] / 2), math.cos(self.T[2] / 2)
         self.stb.sendTransform(ts)
         self.get_logger().info('■ kept: start lateral %+.3f m, heading %+.1f deg -> %s (FAST-LIO pid %s). '
-                               'Walk it anywhere with the remote; dhere lock=keep starts from this'
+                               'Walk it anywhere with the remote; dhere starts from this (dkeep may be closed)'
                                % (res['lateral'], math.degrees(res['heading_err']), KEEP, fastlio_pid()))
 
     def tick(self):
