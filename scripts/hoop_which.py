@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Which branch would the runner take for RED and for YELLOW, right now? — debug tool, the robot does not move.
+"""Which arch is red and which is yellow, as the runner sees it: 인코스 = ?, 아웃코스 = ? — debug, robot does not move.
 
     scripts/hoop_which.sh [seconds=15] [route=rec105326_lap1] [pose=x,y,yaw_deg]          (alias d1which)
 
@@ -40,7 +40,14 @@ class Which(Node):
         super().__init__('hoop_which')
         self.secs, self.z, self.pose = secs, z, pose
         order = sorted(z['branches'], key=lambda n: math.hypot(*z['branches'][n]))
-        self.label = {order[0]: '인코스(안쪽)', order[-1]: '아웃코스(바깥쪽)'}
+        self.order = order
+        self.label = {}
+        for n in order:
+            hx, hy = z['branches'][n]
+            b = math.degrees(math.atan2(math.sin(math.atan2(hy - pose[1], hx - pose[0]) - pose[2]),
+                                        math.cos(math.atan2(hy - pose[1], hx - pose[0]) - pose[2])))
+            self.label[n] = '%s(%s, %s %.0f°)' % ('인코스' if n == order[0] else '아웃코스', n.split('_')[-1],
+                                                 '왼쪽' if b > 0 else '오른쪽', abs(b))
         self.seen = {'red': [], 'yellow': []}
         self.picks = {'red': [], 'yellow': []}
         self.n = 0
@@ -69,37 +76,56 @@ class Which(Node):
             elif isinstance(v, dict) and v.get('side') in ('left', 'right'):
                 self.seen[c].append((t, v['side']))
 
+    def course_line(self):
+        """{branch: [colours]} from the runner's choice for each colour, + the bearings seen."""
+        got, bear = {}, {}
+        for c, k in (('red', '빨강'), ('yellow', '노랑')):
+            name, _ = self.decide(c)
+            if self.seen[c]:
+                v = self.seen[c][-1][1]
+                bear[k] = ('%+.0f°' % math.degrees(math.atan2(math.sin(v - self.pose[2]), math.cos(v - self.pose[2])))
+                           if isinstance(v, float) else v)
+            if name is not None:
+                got.setdefault(name, []).append(k)
+                self.picks[c].append(name)
+        return got, bear
+
+    def fmt(self, got):
+        out = []
+        for n in self.order:
+            cs = got.get(n, [])
+            out.append('%s = %s' % (self.label[n], ' + '.join(cs) if cs else '?'))
+        return '   ·   '.join(out)
+
     def tick(self):
         self.pub.publish(Bool(data=True))
         t = time.time()
         if t - self.last >= 1.0:
             self.last = t
-            parts = []
-            for c, k in (('red', '빨강'), ('yellow', '노랑')):
-                name, why = self.decide(c)
-                if name is None:
-                    parts.append('%s: 아직 (%d번 봄, 3번 필요)' % (k, len(self.seen[c])))
-                else:
-                    self.picks[c].append(name)
-                    b = math.degrees(math.atan2(math.sin(self.seen[c][-1][1] - self.pose[2]),
-                                                math.cos(self.seen[c][-1][1] - self.pose[2]))) \
-                        if isinstance(self.seen[c][-1][1], float) else self.seen[c][-1][1]
-                    parts.append('%s → %s %s (보인 방향 %s)' % (k, name, self.label.get(name, ''),
-                                                          ('%+.0f°' % b) if isinstance(b, float) else b))
-            print('%3.0f s  답 %d  |  %s' % (t - self.t0, self.n, '  |  '.join(parts)), flush=True)
+            got, bear = self.course_line()
+            warn = ''
+            for n, cs in got.items():
+                if len(cs) > 1:
+                    warn = '   ★ 두 색이 모두 %s — 카드 방향이 애매함' % self.label[n]
+            print('%3.0f s  %s   (보인 방향 %s, 답 %d)%s' % (t - self.t0, self.fmt(got),
+                                                   ', '.join('%s %s' % kv for kv in bear.items()) or '없음', self.n, warn),
+                  flush=True)
         if t - self.t0 > self.secs:
             for _ in range(3):
                 self.pub.publish(Bool(data=False))
             print('── 결과 (%d초, 답 %d개)' % (self.secs, self.n))
             if self.n == 0:
                 print('★ 답 없음: 훌라후프 노드가 꺼졌거나(d1hoopon) 카메라가 꺼짐')
+            final = {}
             for c, k in (('red', '빨강'), ('yellow', '노랑')):
                 p = self.picks[c]
                 if p:
                     top = max(set(p), key=p.count)
-                    print('%s 받으면 → %s %s  (%d/%d초 같은 결론)' % (k, top, self.label.get(top, ''), p.count(top), len(p)))
-                else:
-                    print('%s 받으면 → 결정 못 함 (카드가 3번 이상 안 보임) → 주행기는 10초 뒤 무작위' % k)
+                    final.setdefault(top, []).append('%s(%d/%d초)' % (k, p.count(top), len(p)))
+            for n in self.order:
+                print('  %s : %s' % (self.label[n], ' + '.join(final.get(n, [])) or '? (그 색 카드를 3번 이상 못 봄)'))
+            if any(len(v) > 1 for v in final.values()):
+                print('  ★ 두 색이 같은 코스로 나옴 — 로봇이 보는 자리·방향이 틀렸거나 카드 상자가 엉뚱한 곳')
             raise SystemExit
 
 
