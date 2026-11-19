@@ -2,7 +2,8 @@
 # Practice: start ANYWHERE on the route (stand on it, facing along it) and stop at the start mark — test only, a fork
 # of the runner (day1.sh run is not changed). Needs `day1.sh up`.  ★ moves the robot: space/x = STOP, q = quit.
 #   practice_run.sh [route=rec105326_lap1] [hoop=in] [v=0.8] [debug=true light=none] [...]      (alias d1here)
-# Defaults: route rec105326_lap1, hoop=in, v=0.8, lookahead 0.5, min_radius 0.4, max_lat 0.5, max_head 30.
+# Defaults: route rec105326_lap1, hoop=in, v=0.8, lookahead 0.5, min_radius 0.4, max_lat 0.5, max_head 30,
+#   debug=true light=none (mid-course the traffic light is not in view: it goes as soon as it has found itself).
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 TD=$ROOT/src/mission/track_day1
@@ -31,4 +32,6 @@ printf '%s\n' "$@" | grep -q '^lookahead=' || D+=(-p lookahead:=0.5)
 printf '%s\n' "$@" | grep -q '^min_radius=' || D+=(-p min_radius:=0.4)
 printf '%s\n' "$@" | grep -q '^max_lat=' || D+=(-p max_lat:=0.5)
 printf '%s\n' "$@" | grep -q '^max_head=' || D+=(-p max_head:=30.0)
+printf '%s\n' "$@" | grep -q '^light=' || D+=(-p light:=none)
+printf '%s\n' "$@" | grep -q '^debug=' || D+=(-p debug:=true)
 python3 "$TD/practice_runner_node.py" --ros-args -p "path_file:=$f" "${D[@]}" "${A[@]}" 2>&1 | tee "$LOG/run_practice_$(date +%H%M%S).log"
