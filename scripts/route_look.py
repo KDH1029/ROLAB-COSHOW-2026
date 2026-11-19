@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Look point for the hula hoops: written into each route's <route>.zones.json (type 'look').
 
-    python3 scripts/route_look.py <route1.csv> <route2.csv> at=x,y [arch_x=0.15] [yaw=deg] [timeout=5] [default=0]
+    python3 scripts/route_look.py <route1.csv> <route2.csv> at=x,y [arch_x=0.15] [yaw=deg] [timeout=10]
 
 The robot (run with hoop=red|yellow) stops at `at`, turns to `yaw` (default: towards the middle of the two hoops),
 asks the hoop vision once, and goes on along the route whose hoop has the wanted colour. Each route's hoop = where it
@@ -40,7 +40,7 @@ def main():
     mid = np.mean([hoops[n] for n in names], axis=0)
     yaw = float(kv['yaw']) if 'yaw' in kv else math.degrees(math.atan2(mid[1] - at[1], mid[0] - at[0]))
     zone = dict(name='hoop', type='look', at=at, yaw_deg=round(yaw, 1), branches=hoops,
-                timeout_s=float(kv.get('timeout', 5)), default=int(kv.get('default', 0)))
+                timeout_s=float(kv.get('timeout', 10)), default=int(kv.get('default', 0)))
     for p in paths:
         zf = p[:-4] + '.zones.json'
         zones = json.load(open(zf)) if os.path.exists(zf) else []

@@ -19,6 +19,7 @@ States
 import json
 import math
 import os
+import random
 import select
 import sys
 import termios
@@ -110,7 +111,7 @@ class Day1Runner(Node):
         # hula hoop: the colour given before the run; at the zone file's look point the robot stops, faces the hoops,
         # asks the hoop vision once and continues on the route that goes through that colour's hoop
         self.hoop = str(p('hoop', '').value).strip().lower()      # '' | red | yellow
-        self.look_timeout = float(p('look_timeout', 5.0).value)
+        self.look_timeout = float(p('look_timeout', 10.0).value)   # s without the hoop vision, then a random branch
         self.light_timeout = float(p('light_timeout', 20.0).value)   # s waiting for GREEN, then go anyway (0 = never)
         self.wait_t = None
         if self.mode not in ('wall', 'vision'):
@@ -532,7 +533,8 @@ class Day1Runner(Node):
                 self.cam_pub_t = t
             name, why = self.look_decide()
             if name is None and t - lk['t'] > float(z.get('timeout_s', self.look_timeout)):
-                name, why = list(z['branches'])[int(z.get('default', 0))], '★ no %s hoop seen in %.0f s — default' % (self.hoop, t - lk['t'])
+                name = random.choice(list(z['branches']))
+                why = '★ no %s hoop seen in %.0f s — random pick' % (self.hoop, t - lk['t'])
             if name is not None:
                 self.look_switch(name, why, s_r)
 
