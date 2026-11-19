@@ -5,6 +5,11 @@
   in   /camera/color/image_raw (BEST_EFFORT) — subscribed only while someone watches the view
   out  /yolo_test/view/compressed  sensor_msgs/CompressedImage  JPEG, half size, every box of the model drawn
        /yolo_test/dets             std_msgs/String JSON [[class, conf, x1, y1, x2, y2], ...] (full-size pixels)
+       /yolo_test/capture_status   std_msgs/String  what the capture is doing
+  in   /yolo_test/capture          std_msgs/String  'one' = save the next frame · 'start' / 'stop' = every frame (hz)
+Capture: ~/yolo_test/captures/<HHMMSS>/NNNN.jpg (full-size original, no boxes, JPEG 95) + NNNN.json (boxes, engine,
+stamp) + NNNN.txt (the boxes as YOLO labels: class cx cy w h, 0..1 — a draft for labelling). At most cap_max frames
+per session (600). scripts/yolo_view.sh copies them to the NUC (logs/yolo_test/captures) when the window closes.
 Runs the engine only while /yolo_test/view/compressed has a subscriber (scripts/yolo_view.sh on the NUC), at `hz`.
 Half-size JPEG at 5 Hz is ~100-150 KB/s: the raw 848x480 stream would fill the robot's 100 Mb/s link (11-05).
 Parameters: engine (default the hula-hoop tl6_1119 engine), names (default by class count), conf 0.25, hz 5,
@@ -55,6 +60,12 @@ class YoloView(Node):
         self.sub = None
         self.last = 0.0
         self.n, self.t_fps, self.fps = 0, time.time(), 0.0
+        self.cap_root = os.path.join(HERE, 'captures')
+        self.cap_max = int(g('cap_max', 600))
+        self.cap_one = self.cap_on = False
+        self.cap_dir, self.cap_n = None, 0
+        self.pub_cap = self.create_publisher(String, '/yolo_test/capture_status', 5)
+        self.create_subscription(String, '/yolo_test/capture', self.cb_capture, 5)
         self.create_timer(1.0, self.watchers)
         self.get_logger().info('yolo test view ready: %s (%d classes: %s) — waiting for a viewer'
                                % (os.path.basename(self.engine_path), nc, ', '.join(self.names)))
@@ -70,6 +81,43 @@ class YoloView(Node):
             self.sub = None
             self.get_logger().info('no viewer — camera and engine idle')
 
+    def cb_capture(self, m):
+        cmd = m.data.strip().lower()
+        if cmd in ('one', 'start') and self.cap_dir is None:
+            self.cap_dir = os.path.join(self.cap_root, time.strftime('%H%M%S'))
+            os.makedirs(self.cap_dir, exist_ok=True)
+        if cmd == 'one':
+            self.cap_one = True
+        elif cmd == 'start':
+            self.cap_on = True
+        elif cmd == 'stop':
+            self.cap_on = False
+        self.status('%s' % ('REC' if self.cap_on else 'capture') + ' %d frames -> %s' % (self.cap_n, self.cap_dir or '-'))
+
+    def status(self, text):
+        self.pub_cap.publish(String(data=text))
+        self.get_logger().info(text)
+
+    def capture(self, m, bgr, dets):
+        if self.cap_n >= self.cap_max:
+            self.cap_on = self.cap_one = False
+            self.status('★ capture full (%d frames) -> %s' % (self.cap_n, self.cap_dir))
+            return
+        self.cap_n += 1
+        b = os.path.join(self.cap_dir, '%04d' % self.cap_n)
+        cv2.imwrite(b + '.jpg', bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+        h, w = bgr.shape[:2]
+        with open(b + '.txt', 'w') as f:
+            for c, s, x1, y1, x2, y2 in dets:
+                f.write('%d %.6f %.6f %.6f %.6f\n' % (c, (x1 + x2) / 2 / w, (y1 + y2) / 2 / h, (x2 - x1) / w, (y2 - y1) / h))
+        with open(b + '.json', 'w') as f:
+            json.dump(dict(stamp=m.header.stamp.sec + m.header.stamp.nanosec * 1e-9, engine=os.path.basename(self.engine_path),
+                           names=self.names, conf_thr=self.conf, size=[w, h],
+                           dets=[[int(c), round(s, 3)] + [round(v, 1) for v in bb] for c, s, *bb in dets]), f)
+        if self.cap_one or self.cap_n % 10 == 0:
+            self.status('%s %d frames -> %s' % ('REC' if self.cap_on else 'capture', self.cap_n, self.cap_dir))
+        self.cap_one = False
+
     def cb_image(self, m):
         t = time.time()
         if t - self.last < self.dt:
@@ -80,6 +128,12 @@ class YoloView(Node):
         blob, r, left, top = C.letterbox(bgr, (self.H, self.W))
         dets = C.decode(self.eng.infer(blob), r, left, top, bgr.shape[:2], conf_thr=self.conf)
         ms = 1000 * (time.time() - t)
+        if self.cap_one or self.cap_on:
+            try:
+                self.capture(m, bgr, dets)
+            except Exception as e:
+                self.cap_on = self.cap_one = False
+                self.status('★ capture failed: %s' % e)
         self.pub_dets.publish(String(data=json.dumps([[int(c), round(s, 3)] + [round(v) for v in b]
                                                       for c, s, *b in dets])))
         self.n += 1
@@ -93,6 +147,10 @@ class YoloView(Node):
             cv2.rectangle(img, p1, p2, col, 2 if s >= 0.5 else 1)
             cv2.putText(img, '%s %.2f' % (name, s), (p1[0], max(10, p1[1] - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, col, 1,
                         cv2.LINE_AA)
+        if self.cap_on:
+            cv2.circle(img, (img.shape[1] - 14, 14), 7, (0, 0, 255), -1)
+            cv2.putText(img, 'REC %d' % self.cap_n, (img.shape[1] - 80, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                        (0, 0, 255), 1, cv2.LINE_AA)
         cv2.putText(img, '%s  %d boxes  %.0f ms  %.1f Hz' % (os.path.basename(self.engine_path).split('_384')[0],
                                                           len(dets), ms, self.fps),
                     (4, img.shape[0] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
