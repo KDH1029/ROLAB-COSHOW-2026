@@ -6,7 +6,9 @@
 #                         MAX_VX=0.8 bridge forward-speed limit (the runner lowers v to it), TRIM=0 no ClassicWalk yaw trim
 #   day1.sh teach in|out name=R   robot standing on its start mark (after up): drive ONE lap with the remote
 #                         around the cones; saved when back past the start (Enter = save now) -> logs/day1/routes/R.csv
-#   day1.sh run in|out route=R [v=0.4 lookahead=0.5]   follow the taught route R (same start, light, lap end)
+#   day1.sh run in|out route=R [v=0.4 lookahead=0.5] [hoop=red|yellow]   follow route R (same start, light, lap end);
+#                         hoop: at the route's look point stop, face the hoops, ask the hoop vision once, take the
+#                         branch through that colour (keys 1 / 2 pick by hand while looking)
 #   day1.sh routes        list taught routes
 #   day1.sh edit R        edit route R on the map (drag pins; s saves, old file kept as .bak_HHMMSS)
 #   day1.sh bench         table of logs/day1/bench.csv (one line per finished run: gait, v, lap time, lateral, roll/pitch)
