@@ -5,7 +5,8 @@
        /camera/color/image_raw, /camera/color/camera_info  (same PC's D435, BEST_EFFORT) — subscribed only while active
   out  /mission/hoop_state   std_msgs/String JSON  {"red": {"bearing_deg": +left, "conf": .., "u": px},
                                                     "yellow": {...}}   (a colour not seen is left out)
-Model: YOLOv8 2 classes (0 rh, 1 yh) trained on insu_label (11-19), hoop_384x640_fp16.engine next to this file.
+Model: either the hoop-only YOLOv8 (0 rh, 1 yh, insu_label 11-19, hoop_384x640_fp16.engine — the default) or the
+team's 6-class tl6_1119 (2 rh, 3 yh): engine:=... red_cls:=2 yellow_cls:=3.
 Bearing = atan((cx - u) / fx) of the best box of each colour (camera looks forward like the robot).
 Same pre/post-processing as the traffic-light node (tl_yolo_common: letterbox 384x640, decode, NMS).
 ★ Python 3.8.
@@ -28,8 +29,6 @@ sys.path.insert(0, HERE)
 import tl_yolo_common as C  # noqa: E402
 from trt_engine import TrtEngine  # noqa: E402
 
-COLOURS = {0: 'red', 1: 'yellow'}
-
 
 def to_bgr(msg):
     enc = msg.encoding.lower()
@@ -45,11 +44,14 @@ class HoopNode(Node):
         self.declare_parameter('hz', 5.0)
         self.declare_parameter('image_topic', '/camera/color/image_raw')
         self.declare_parameter('info_topic', '/camera/color/camera_info')
+        self.declare_parameter('red_cls', 0)        # hoop-only model 0/1, tl6_1119 2/3
+        self.declare_parameter('yellow_cls', 1)
         g = lambda n: self.get_parameter(n).value
         self.eng = TrtEngine(g('engine'))
         self.H, self.W = self.eng.input_shape[2], self.eng.input_shape[3]
         self.eng.infer(np.zeros(self.eng.input_shape, np.float32))      # warm up
         self.conf, self.dt = float(g('conf')), 1.0 / float(g('hz'))
+        self.colours = {int(g('red_cls')): 'red', int(g('yellow_cls')): 'yellow'}
         self.qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST)
         self.subs = []
         self.active = False
@@ -91,7 +93,7 @@ class HoopNode(Node):
         cx = self.K[0, 2] if self.K is not None else bgr.shape[1] / 2.0
         res = {}
         for c, s, x1, y1, x2, y2 in dets:                 # best (first) box of each colour
-            name = COLOURS.get(c)
+            name = self.colours.get(c)
             if name is None or name in res:
                 continue
             u = 0.5 * (x1 + x2)

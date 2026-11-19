@@ -24,7 +24,9 @@ RUN=(nice -n 19 taskset -c $CORES)
 node_pid(){ pgrep -f "[t]raffic_light_trt_node.py"; }
 hoop_pid(){ pgrep -f "[h]oop_trt_node.py"; }
 cam_pid(){ pgrep -f "[r]ealsense2_camera_node"; }
-HOOP_ONNX=$D/hoop_384x640.onnx; HOOP_E16=$D/hoop_384x640_fp16.engine
+# hula hoop: own 2-class model (default) or the team's 6-class one: HOOP_E16=<engine> HOOP_CLS="2 3" (rh yh class ids)
+HOOP_ONNX=$D/hoop_384x640.onnx; HOOP_E16=${HOOP_E16:-$D/hoop_384x640_fp16.engine}
+HOOP_CLS=${HOOP_CLS:-$(cat $D/hoop_classes.txt 2>/dev/null || echo 0 1)}   # written by scripts/hoop_model.py on the NUC
 cam_start(){   # color + depth 848x480x30, the same arguments as the recording
   if [ -z "$(cam_pid)" ]; then
     P=848x480x30
@@ -80,7 +82,8 @@ case "${1:-status}" in
     cam_start
     if [ -n "$(hoop_pid)" ]; then echo "훌라후프 노드 이미 켜져 있음: pid $(hoop_pid)"; exit 0; fi
     L=$D/logs/hoop_$(date +%H%M%S).log
-    setsid nohup "${RUN[@]}" python3 $D/hoop_trt_node.py --ros-args -p engine:=$HOOP_E16 > $L 2>&1 < /dev/null &
+    set -- $HOOP_CLS
+    setsid nohup "${RUN[@]}" python3 $D/hoop_trt_node.py --ros-args -p engine:=$HOOP_E16 -p red_cls:=$1 -p yellow_cls:=$2 > $L 2>&1 < /dev/null &
     sleep 5; tail -2 $L; [ -n "$(hoop_pid)" ] && echo "■ 훌라후프 노드 켬 (로그 $L)" || { echo "★ 노드가 안 떴다 — $L"; exit 1; };;
   hoop-stop)   pkill -INT -f "[h]oop_trt_node.py" && echo "훌라후프 노드 끔" || echo "훌라후프 노드 없음";;
   stop-camera) pkill -INT -f "[r]s_launch.py"; pkill -INT -f "[r]ealsense2_camera_node" && echo "카메라 끔" || echo "카메라 없음";;

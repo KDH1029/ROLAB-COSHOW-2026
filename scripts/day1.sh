@@ -19,7 +19,8 @@
 #   day1.sh vision snap   camera + bird's-eye check images -> logs/snap/
 #   day1.sh xt16          start the XT16 driver if it is not running, show /lidar_points rate (20 Hz expected)
 #   day1.sh light         start the YOLO traffic-light node (~/junsu_vision on the internal PC)
-#   day1.sh hoop push|build|start|stop|status   hula-hoop vision on the internal PC (push the model, build the TRT
+#   day1.sh hoop use <model.pt|onnx>   a new YOLO model with rh/yh -> ready (ONNX 384x640 + class ids); then hoop deploy
+#   day1.sh hoop deploy|push|build|start|stop|status   hula-hoop vision on the internal PC (push the model, build the TRT
 #                         engine once with the robot lying down, start the node; it looks only at the look point)
 #   day1.sh lightcheck [s] watch the real light for s seconds the way the runner does (robot does not move)
 #   day1.sh status        rates of the topics that matter
@@ -140,11 +141,17 @@ case "${1:-}" in
   light) "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh start';;
   hoop)   # hula-hoop vision on the internal PC: day1.sh hoop push|build|start|stop|status
     case "${2:-status}" in
+      use)  # day1.sh hoop use <model.pt|onnx> [red=<id> yellow=<id>]: ONNX 384x640 + class ids, ready to deploy
+        ~/venv/go2/bin/python3 "$ROOT/scripts/hoop_model.py" "${@:3}";;
+      deploy)  # push + engine (robot lying down) + start
+        bash "$ROOT/src/vision/start_light/deploy_onboard_vision.sh" push || exit 1
+        echo "★ 로봇을 엎드려 둔 채로 (엔진 만들기, 약 3분)"; "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh hoop-build' || exit 1
+        "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh hoop-start';;
       push) bash "$ROOT/src/vision/start_light/deploy_onboard_vision.sh" push;;
       build) echo "★ 로봇을 엎드려 둔 채로 (내부 PC 가 로봇 펌웨어 PC)"; "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh hoop-build';;
       start|stop) "${SSH[@]}" $ROBOT "bash ~/junsu_vision/jetson_vision.sh hoop-${2}";;
       status) "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh status';;
-      *) echo "hoop push|build|start|stop|status";;
+      *) echo "hoop use <model>|deploy|push|build|start|stop|status";;
     esac;;
   teach)   # drive one lap with the remote, the lap is saved as a route (nothing goes to the motors)
     env_ros; shift
