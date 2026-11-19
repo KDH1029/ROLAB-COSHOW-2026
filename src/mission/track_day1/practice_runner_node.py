@@ -136,6 +136,28 @@ class AnyStartLock(TP.StartLock):
         return dict(T_track_odom=Tto, pose=pose, s=s, lateral=lat, heading_err=head)
 
 
+class KeptLock(TP.StartLock):
+    """lock=keep: track <- odom kept by track_keep_node (dkeep) since the start mark; no wall fit needed here."""
+
+    def __init__(self, T, info, *a, **k):
+        super().__init__(*a, **k)
+        self.T, self.twin_info = tuple(T), info
+
+    def feed(self, wall, odom):
+        for key, v in (('walls_seen', 0), ('dims', (0.0, 0.0)), ('rms', 0.0)):   # the runner logs these
+            wall.setdefault(key, v)
+        pose = TP.compose(self.T, odom)
+        lat, _, s = TP.lateral_of(self.loop, pose[0], pose[1])
+        a, b = self.loop.pose_at(s), self.loop.pose_at(s + 0.5)
+        head = TP.wrap(pose[2] - math.atan2(b[1] - a[1], b[0] - a[0]))
+        if abs(lat) > self.max_lat or abs(head) > self.max_head:
+            self.why = 'placement (kept position): lateral %+.2f m, heading %+.1f deg (limits %.2f m, %.0f deg)' % (
+                lat, math.degrees(head), self.max_lat, math.degrees(self.max_head))
+            return None
+        self.why = ''
+        return dict(T_track_odom=self.T, pose=pose, s=s, lateral=lat, heading_err=head)
+
+
 class PracticeRunner(R.Day1Runner):
     def __init__(self):
         super().__init__()
@@ -149,9 +171,30 @@ class PracticeRunner(R.Day1Runner):
             raise SystemExit('practice runner: a route is needed (route=<name>)')
         self.wlock = AnyStartLock(self.lane, n=self.lock_n, max_lat=self.max_lat, max_head_deg=self.max_head,
                                   loop=self.loop, offset=self.track_off)
+        if str(p('lock', 'walls')).strip().lower() == 'keep':
+            import json
+            f = os.path.join(os.environ.get('DAY1_LOG', os.path.join(ROOT, 'logs', 'day1')), 'track_keep.json')
+            if not os.path.exists(f):
+                raise SystemExit('lock=keep: no %s — run dkeep on the start mark first' % f)
+            k = json.load(open(f))
+            try:
+                pid = int(open(os.path.join(os.path.dirname(f), 'fastlio.pid')).read().strip())
+            except Exception:
+                pid = None
+            if pid is None or pid != k.get('fastlio_pid'):
+                raise SystemExit('lock=keep: the kept position belongs to another FAST-LIO run (pid %s, now %s) — '
+                                 'dkeep again on the start mark' % (k.get('fastlio_pid'), pid))
+            age = time.time() - k['time']
+            info = 'kept by dkeep %.0f s ago (FAST-LIO pid %s)' % (age, pid)
+            if age > 900:
+                self.get_logger().warn('★ the kept position is %.0f min old — FAST-LIO drifts (~4 cm / 4 min): dkeep again?' % (age / 60))
+            self.wlock = KeptLock(k['T_track_odom'], info, self.lane, n=1, max_lat=self.max_lat,
+                                  max_head_deg=self.max_head, loop=self.loop, offset=self.track_off)
+            self.get_logger().info('★ PRACTICE: lock=keep — ' + info)
         mapd = str(p('lock_map', os.path.join(ROOT, 'maps', 'coshow_1119')))
         try:
-            self.wlock.mtree = map_inside_tree(mapd)
+            if isinstance(self.wlock, AnyStartLock):
+                self.wlock.mtree = map_inside_tree(mapd)
         except Exception as e:
             self.get_logger().warn('★ lock map %s not loaded (%s) — twin by the route fit only' % (mapd, e))
         self.end_set = False
