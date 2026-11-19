@@ -9,7 +9,8 @@
 #   day1.sh run in|out route=R [v=0.4 lookahead=0.5] [hoop=red|yellow]   follow route R (same start, light, lap end);
 #                         hoop: at the route's look point stop, face the hoops, ask the hoop vision once, take the
 #                         branch through that colour (keys 1 / 2 pick by hand while looking)
-#   day1.sh routes        list taught routes
+#   day1.sh routes        list routes (working copies in logs/day1/routes, then the repo's routes/)
+#   day1.sh selftest      fake-robot check of everything that runs (track in/out, mission in/out/red/yellow, no vision)
 #   day1.sh edit R        edit route R on the map (drag pins; s saves, old file kept as .bak_HHMMSS)
 #   day1.sh sync R1 R2    after editing R1: its shared stretches (as they were before the edit) -> R2
 #   day1.sh bench         table of logs/day1/bench.csv (one line per finished run: gait, v, lap time, lateral, roll/pitch)
@@ -139,7 +140,10 @@ case "${1:-}" in
     env_ros; shift
     A=(); for kv in "$@"; do case $kv in in|out) A+=(-p "lane:=$kv");; *=*) A+=(-p "${kv%%=*}:=${kv#*=}");; esac; done
     python3 "$TD/day1_teach_node.py" --ros-args "${A[@]}" 2>&1 | tee "$LOG/teach_$(date +%H%M%S).log";;
-  routes) ls -t "$LOG/routes/"*.csv 2>/dev/null | grep -v -e _raw -e '\.bak_' || echo "no routes yet";;
+  routes) echo "working copies ($LOG/routes, used first):"; ls -t "$LOG/routes/"*.csv 2>/dev/null | grep -v -e _raw -e '\.bak_' || echo "  none"
+          echo "in the repo ($ROOT/routes):"; ls "$ROOT/routes/"*.csv 2>/dev/null || echo "  none";;
+  selftest)   # everything that runs today, on the fake robot, 6 runs in parallel (own ROS domains, loopback): ~3 min
+    bash "$ROOT/tests/selftest.sh";;
   edit)   # route editor on the map: day1.sh edit <route> [map=maps/coshow_1119]   (window stays until closed)
     f=$LOG/routes/${2:?route name}.csv; [ -f "$f" ] || { echo "★ no $f (day1.sh routes)"; exit 1; }
     export DISPLAY=${DISPLAY:-:0}
@@ -161,8 +165,10 @@ case "${1:-}" in
     A=(); for kv in "$@"; do
       case $kv in
         in|out) A+=(-p "lane:=$kv");;
-        route=*) r=${kv#*=}; f=$LOG/routes/$r.csv; [ -f "$f" ] || { echo "★ no route $f (day1.sh teach ...)"; exit 1; }
-                 A+=(-p "path_file:=$f");;
+        route=*) r=${kv#*=}; f=$LOG/routes/$r.csv          # working copy (edit / teach) first, then the repo's routes/
+                 [ -f "$f" ] || f=$ROOT/routes/$r.csv
+                 [ -f "$f" ] || { echo "★ no route $r in $LOG/routes or $ROOT/routes (day1.sh routes)"; exit 1; }
+                 echo "route: $f"; A+=(-p "path_file:=$f");;
         *=*) A+=(-p "${kv%%=*}:=${kv#*=}");;
         *) echo "★ unknown argument $kv (in|out key=value)"; exit 1;;
       esac
