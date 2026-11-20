@@ -58,7 +58,7 @@ class Which(Node):
         self.create_timer(0.5, self.tick)
 
     def decide(self, colour):
-        fake = SimpleNamespace(look=dict(zone=self.z, pose=self.pose, yaw_now=self.pose[2]),
+        fake = SimpleNamespace(look=dict(zone=self.z, pose=self.pose, yaw_now=self.pose[2], step='see'),
                                hoop_seen=self.seen[colour], hoop_pick=None)
         return R.Day1Runner.look_decide(fake)
 
@@ -72,9 +72,9 @@ class Which(Node):
         for c in ('red', 'yellow'):
             v = d.get(c)
             if isinstance(v, dict) and 'bearing_deg' in v:          # the runner's cb_hoop, as is
-                self.seen[c].append((t, self.pose[2] + math.radians(float(v['bearing_deg']))))
+                self.seen[c].append((t, self.pose[2] + math.radians(float(v['bearing_deg'])), self.pose))
             elif isinstance(v, dict) and v.get('side') in ('left', 'right'):
-                self.seen[c].append((t, v['side']))
+                self.seen[c].append((t, v['side'], self.pose))
 
     def course_line(self):
         """{branch: [colours]} from the runner's choice for each colour, + the bearings seen."""

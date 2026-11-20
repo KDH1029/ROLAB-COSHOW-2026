@@ -244,8 +244,8 @@ class ConeRunner(R.Day1Runner):
         tp = self.track_pose(cur)
         s_r = self.prog.s
         s_to = s_r + 6.0
-        if self.look is not None and self.look['step'] == 'go':
-            s_to = min(s_to, self.look['s'])
+        if self.look is not None and self.look['step'] in ('go', 'move'):
+            s_to = min(s_to, self.look['fork'])     # look point (look_mode=stop) / fork while undecided (move)
         res = self.cone_plan(s_r, s_to, tp, t)
         if res is None:                                     # not near a cone zone
             if c['avoiding']:
