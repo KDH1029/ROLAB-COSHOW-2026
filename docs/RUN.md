@@ -29,7 +29,7 @@
 | 1일차 트랙, 아웃코스 (끝남, 별칭 없음) | – | `day1.sh run out v=0.8` |
 | 미션 코스 (빨강을 받았을 때) | `dred` | `day1.sh run route=rec105326_lap1 hoop=red v=0.8` |
 | 미션 코스 (노랑을 받았을 때) | `dyellow` | `day1.sh run route=rec105326_lap1 hoop=yellow v=0.8` |
-| 미션 코스, 갈래를 미리 정함 (안쪽 / 바깥쪽) | `dhin` / `dhout` | `day1.sh run route=rec105326_lap1 hoop=in v=0.8` / `hoop=out` |
+| 미션 코스, 갈래를 미리 정함 (안쪽 / 바깥쪽) | `din` / `dout` | `day1.sh run route=rec105326_lap1 hoop=in v=0.8` / `hoop=out` |
 
 - `v`의 상한은 0.8이다(모터 브리지 `max_vx`). 넘게 주면 주행기가 0.8로 낮춘다.
 - `in`·`out`은 1일차 트랙의 레인 선택이다. `route=`를 주면 경로 파일이 길을 정하므로 쓰지 않는다.
