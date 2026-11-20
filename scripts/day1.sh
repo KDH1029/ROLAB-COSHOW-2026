@@ -137,7 +137,8 @@ case "${1:-}" in
       echo "XT16 driver started"; sleep 5
     elif [ "$n" -gt 1 ]; then echo "★ $n XT16 drivers running — keep one: pkill -INT -x hesai_ros_drive, then day1.sh xt16"; exit 1
     else echo "XT16 driver already running"; fi
-    timeout 6 ros2 topic hz /lidar_points --window 20 2>/dev/null | grep -m1 average || echo "★ no /lidar_points — restart: pkill -INT -x hesai_ros_drive; day1.sh xt16";;
+    r=$(timeout 6 ros2 topic hz /lidar_points --window 20 2>/dev/null | grep -m1 average)   # (pipefail: timeout's 124 is not a failure)
+    [ -n "$r" ] && echo "$r" || echo "★ no /lidar_points — restart: pkill -INT -x hesai_ros_drive; day1.sh xt16";;
   light) "${SSH[@]}" $ROBOT 'bash ~/junsu_vision/jetson_vision.sh start';;
   hoop)   # hula-hoop vision on the internal PC: day1.sh hoop push|build|start|stop|status
     case "${2:-status}" in
