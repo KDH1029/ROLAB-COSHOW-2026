@@ -24,7 +24,7 @@
 #                         engine once with the robot lying down, start the node; it looks only at the look point)
 #   day1.sh lightcheck [s] watch the real light for s seconds the way the runner does (robot does not move)
 #   day1.sh status        rates of the topics that matter
-#   day1.sh run in|out [v=0.5] [gait=classic|freewalk|trotrun|static|economic] [lookahead=0.8] [light=none] [extra=1.2] [track_dx=0 track_dy=0 track_dyaw_deg=0] [path_file=pins.csv]
+#   day1.sh run in|out [v=0.5] [gait=classic|freewalk|trotrun|static|economic] [lookahead=0.8] [light=none] [extra=1.2] [track_dx=0 track_dy=0 track_dyaw_deg=0] [path_file=pins.csv] [cv=0.7 zv=0.4]
 #                         in = inner lane (2), out = outer lane (1); one counter-clockwise lap, then stop.
 #                         ★ stand the robot on its start mark first; space/x = STOP
 #   day1.sh down          stop what `up` started
@@ -187,6 +187,8 @@ case "${1:-}" in
                  [ -f "$f" ] || f=$ROOT/routes/$r.csv
                  [ -f "$f" ] || { echo "★ no route $r in $LOG/routes or $ROOT/routes (day1.sh routes)"; exit 1; }
                  echo "route: $f"; A+=(-p "path_file:=$f");;
+        cv=*) A+=(-p "cones_v:=${kv#*=}");;          # cv = cones_v  (콘 구간 속도, 이번 주행만)
+        zv=*) A+=(-p "zigzag_v:=${kv#*=}");;         # zv = zigzag_v (지그재그 구간 속도, 이번 주행만)
         *=*) A+=(-p "${kv%%=*}:=${kv#*=}");;
         *) echo "★ unknown argument $kv (in|out key=value)"; exit 1;;
       esac

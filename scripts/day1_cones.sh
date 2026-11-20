@@ -30,6 +30,8 @@ case "${1:-}" in
                  [ -f "$f" ] || f=$ROOT/routes/$r.csv
                  [ -f "$f" ] || { echo "★ no route $r in $LOG/routes or $ROOT/routes"; exit 1; }
                  echo "route: $f"; A+=(-p "path_file:=$f");;
+        cv=*) A+=(-p "cones_v:=${kv#*=}");;          # cv = cones_v  (콘 구간 속도, 이번 주행만)
+        zv=*) A+=(-p "zigzag_v:=${kv#*=}");;         # zv = zigzag_v (지그재그 구간 속도, 이번 주행만)
         *=*) A+=(-p "${kv%%=*}:=${kv#*=}");;
         *) echo "★ unknown argument $kv (in|out key=value)"; exit 1;;
       esac
