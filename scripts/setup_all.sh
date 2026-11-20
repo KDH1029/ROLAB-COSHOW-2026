@@ -39,7 +39,7 @@ done
 "$D1" hoop status 2>/dev/null | grep -m1 "카메라:" | sed 's/^/  /'
 echo
 if [ ${#warn[@]} -eq 0 ]; then
-  echo "■ ready — per run: dalign, then dred / dyellow / din (add light_timeout=10 if the light is off)"
+  echo "■ ready — per run: dalign, then dred / dyellow / din (practice: add debug=true, g = go without the light)"
 else
   echo "★ ready with problems: ${warn[*]} — fix those before a competition run"
 fi
