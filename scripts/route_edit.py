@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Route editor — pins on the arena map (track frame), the file the runner follows (day1.sh run ... route=<name>).
 
-    python3 scripts/route_edit.py <route.csv> [map=maps/coshow_1119] [raw=<drive raw.csv>]
+    python3 scripts/route_edit.py <route.csv> [map=maps/coshow_1119] [raw=<drive raw.csv>] [drives=<a.csv>,<b.csv>,...]
+    drives: several recorded passes drawn in their own colours (cone_splice.py writes pass_N.csv; dpasses opens them)
     (day1.sh edit <name>  opens logs/day1/routes/<name>.csv)
 
 The route is a closed loop through the pins in order; pin 1 (green) is where the robot starts, travel runs 1 -> 2 -> ...
@@ -93,6 +94,10 @@ def main():
         ix = next((i for i, h in enumerate(head) if h.strip().startswith('x_m')), 0)
         Rw = np.genfromtxt(rawp, delimiter=',', skip_header=1)
         raw = Rw[:, ix:ix + 2]
+    drives = []
+    for i, f in enumerate([q for q in kv.get('drives', '').split(',') if q.strip()]):
+        Dd = np.genfromtxt(f, delimiter=',', names=True)
+        drives.append((os.path.splitext(os.path.basename(f))[0].replace('_', '='), np.column_stack([Dd['x_m'], Dd['y_m']])))
 
     import matplotlib
     matplotlib.use('TkAgg')
@@ -113,6 +118,13 @@ def main():
         raw_line, = ax.plot(raw[:, 0], raw[:, 1], color='#f5a623', lw=0.8, alpha=0.7, zorder=2, label='녹화 주행')
     else:
         raw_line = None
+    drive_lines = []
+    for i, (name, Dd) in enumerate(drives):
+        col = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#8c564b', '#e377c2'][i % 6]
+        ln, = ax.plot(Dd[:, 0], Dd[:, 1], color=col, lw=2.0, alpha=0.8, zorder=3, label='녹화 %s' % name)
+        tx = ax.text(Dd[len(Dd) // 2, 0], Dd[len(Dd) // 2, 1], ' %s' % name.split('=')[-1], color=col, fontsize=13,
+                     weight='bold', zorder=3)
+        drive_lines += [ln, tx]
     zf = path[:-4] + '.zones.json'
     if os.path.exists(zf):     # zones of this route (route_corridor.py): other driving inside
         import json
@@ -175,6 +187,8 @@ def main():
             labels.append(ax.text(P[i, 0], P[i, 1], ' %d' % (i + 1), fontsize=8, zorder=7))
         if raw_line is not None:
             raw_line.set_visible(st['show_raw'])
+        for ln in drive_lines:
+            ln.set_visible(st['show_raw'])
         ax.set_title('%s%s — 핀 %d개, 한 바퀴 %.2f m, 장애물까지 최소 %.2f m (고른 핀 %d: %.2f m)\n'
                      '왼클릭 추가 · 드래그 이동 · 오른클릭 지우기 · u 되돌리기 · s 저장 · q 끝 · h 도움말'
                      % (os.path.basename(path), '' if st['saved'] else ' *', len(P), L, worst, st['sel'] + 1, c[st['sel']]),

@@ -17,6 +17,7 @@ map: inside the cone box (+0.3 m) the occupied cells of map.pgm and the points o
   new map's (map_from_bag.sh on the same drive). Checked first: the new map's walls must sit on the old ones
   (median <= 6 cm outside the box). The old map is copied once to <map>_cones0.
 """
+import glob
 import json
 import os
 import shutil
@@ -36,6 +37,40 @@ RDIR = os.environ.get('SPLICE_ROUTES', os.path.join(ROOT, 'logs/day1/routes'))  
 
 def in_box(P, b, m=0.0):
     return (P[:, 0] > b[0] - m) & (P[:, 0] < b[2] + m) & (P[:, 1] > b[1] - m) & (P[:, 1] < b[3] + m)
+
+
+FIELD = [-0.8, -3.15, 3.75, -0.75]     # the cone field (11-19/20), fixed: passes and the stretch to replace use it
+
+
+def field_passes(R, speed=None, r0=0.6):
+    """[(start, last index in the field)] for every pass of a drive: leaves the place it first stood (the start mark,
+    within r0) and goes out of the cone FIELD (any side). Independent of the route, so the numbering never changes."""
+    at = np.hypot(R[:, 0] - R[0, 0], R[:, 1] - R[0, 1]) < r0
+    out_f = ~in_box(R, FIELD)
+    res, i = [], 0
+    while i < len(R):
+        st = np.nonzero(at[i:])[0]
+        if not len(st):
+            break
+        a = i + int(st[0])
+        ex = np.nonzero(out_f[a:])[0]
+        if not len(ex):
+            break
+        e = a + int(ex[0])
+        j = e - 1
+        while j > i and not at[j]:
+            j -= 1
+        j0 = j
+        while j0 > i and at[j0 - 1]:
+            j0 -= 1
+        run = np.arange(j0, j + 1)
+        if speed is not None and (speed[run] < 0.05).any():
+            a = int(run[speed[run] < 0.05].max())
+        else:
+            a = int(run[np.argmin(np.hypot(R[run, 0] - R[0, 0], R[run, 1] - R[0, 1]))])
+        res.append((a, e - 1))
+        i = e + 1
+    return res
 
 
 def cone_box(route):
@@ -104,21 +139,18 @@ def passes(R, P, box, k, speed=None):
 def do_route(raw, route, other, step, pass_no=1):
     D = np.genfromtxt(raw, delimiter=',', names=True)
     R = np.column_stack([D['x_m'], D['y_m']])
-    box = cone_box(route)
+    box = FIELD
     f = os.path.join(RDIR, route + '.csv')
     lane, P = load_pins(f)
-    # the old cone stretch: pin 0 (start) .. last pin before the route leaves the box
+    # the old cone stretch: pin 0 (start) .. last pin before the route leaves the cone field
     k = 1
     while k < len(P) and in_box(P[k:k + 1], box)[0]:
         k += 1
     if k >= len(P) - 3:
-        sys.exit('★ %s never leaves the cone box %s' % (route, box))
-    # the new drive: from where it stood (start mark) until it leaves the box for good, plus the first point outside
-    if not in_box(R[:1], box)[0]:
-        sys.exit('★ the drive does not start in the cone box %s (start %.2f, %.2f) — wrong recording?' % (box, *R[0]))
-    ps = passes(R, P, box, k, D['speed_mps'] if 'speed_mps' in D.dtype.names else None)
+        sys.exit('★ %s never leaves the cone field %s' % (route, box))
+    ps = field_passes(R, D['speed_mps'] if 'speed_mps' in D.dtype.names else None)
     if pass_no > len(ps):
-        sys.exit('★ pass %d not found (%d passes from the start mark out of the cone box)' % (pass_no, len(ps)))
+        sys.exit('★ pass %d not found (%d passes from the start mark out of the cone field)' % (pass_no, len(ps)))
     a0, last_in = ps[pass_no - 1]
     R = R[a0:]
     last_in -= a0
@@ -127,8 +159,11 @@ def do_route(raw, route, other, step, pass_no=1):
         sys.exit('★ the drive starts %.2f m from the route start — not the same start mark?' % d0)
     N = resample(R[:last_in + 1], step)                # the old pins take over from the first one outside the box
     gap = float(np.hypot(*(N[-1] - P[k])))
-    if gap > 1.2:
-        sys.exit('★ the drive leaves the box %.2f m from where %s does — different exit?' % (gap, route))
+    if gap > 1.6:
+        sys.exit('★ the drive leaves the cone field %.2f m from where %s does — different exit?' % (gap, route))
+    if gap > 0.6:
+        print('★ the drive leaves the field %.2f m from where the route went on: the joint is a straight guess — '
+              'look at it (dpasses / deditin) and move pins around any cone there' % gap)
     NEW = np.vstack([N, P[k:]])
     old_len, new_len = TP.PinLoop(P).length, TP.PinLoop(NEW).length
     save_pins(f, lane, NEW)
@@ -183,8 +218,14 @@ def show_passes(raw, newd, route):
     C = cells(img, res, org)
     C = C[in_box(C, box, 0.0) & (np.abs(C[:, 0]) < 4.2) & (np.abs(C[:, 1]) < 3.2)]
     tree = cKDTree(C) if len(C) else None
-    ps = passes(R, P, box, k, D['speed_mps'] if 'speed_mps' in D.dtype.names else None)
-    print('%d pass(es) from the start mark out of the cone box:' % len(ps))
+    box = FIELD
+    ps = field_passes(R, D['speed_mps'] if 'speed_mps' in D.dtype.names else None)
+    print('%d pass(es) from the start mark out of the cone field:' % len(ps))
+    for f in glob.glob(os.path.join(os.path.dirname(raw), 'pass_*.csv')):
+        os.remove(f)
+    for n, (a, e) in enumerate(ps, 1):          # for the editor: dpasses (route_edit.py drives=...)
+        np.savetxt(os.path.join(os.path.dirname(raw), 'pass_%d.csv' % n), R[a:e + 1], delimiter=',', fmt='%.4f',
+                   header='x_m,y_m', comments='')
     for n, (a, e) in enumerate(ps, 1):
         seg = R[a:e + 1]
         L = float(np.hypot(*np.diff(seg, axis=0).T).sum())
@@ -192,6 +233,37 @@ def show_passes(raw, newd, route):
         print('  pass=%d: %.0f s, %.1f m, nearest cone (map cell) %.2f m%s'
               % (n, D['t_s'][e] - D['t_s'][a], L, dmin, '  ★ close' if dmin < 0.25 else ''))
     print('  the route uses pass=1 unless given: dsplice <bag> pass=N (the slow steps are not repeated)')
+    # picture: every pass over the new map's cone box, numbered
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    sys.path.insert(0, os.path.join(ROOT, 'src/mission/track_day1/tools'))
+    import plot_plan
+    plot_plan._font()
+    fig, ax = plt.subplots(figsize=(13, 8))
+    Cn = cells(img, res, org)
+    ax.scatter(Cn[:, 0], Cn[:, 1], s=4, c='0.45', marker='s', label='새 지도 (이번 녹화)')
+    Lo = TP.PinLoop(P)
+    S = np.array([Lo.pose_at(q)[:2] for q in np.arange(0, Lo.length, 0.05)])
+    ax.plot(S[:, 0], S[:, 1], ':', c='0.5', lw=1, label='지금 경로 (어제 콘 기준)')
+    cols = ['tab:blue', 'tab:red', 'tab:green', 'tab:purple', 'tab:orange', 'tab:brown']
+    for n, (a, e) in enumerate(ps, 1):
+        seg = R[a:e + 1]
+        dmin = float(tree.query(seg)[0].min()) if tree is not None else float('nan')
+        c = cols[(n - 1) % len(cols)]
+        ax.plot(seg[:, 0], seg[:, 1], '-', c=c, lw=2, label='pass=%d  (콘과 최소 %.2f m, %.1f m)' % (n, dmin, float(np.hypot(*np.diff(seg, axis=0).T).sum())))
+        m = len(seg) // 2
+        ax.text(seg[m, 0], seg[m, 1] + 0.08, str(n), color=c, fontsize=14, weight='bold')
+    ax.add_patch(plt.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], fill=False, ec='tab:orange', ls='--'))
+    ax.set_xlim(box[0] - 0.4, box[2] + 0.6)
+    ax.set_ylim(box[1] - 0.4, box[3] + 1.2)
+    ax.set_aspect('equal')
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=9, loc='upper left')
+    ax.set_title('콘 밭 통과별 경로 — 하나를 골라 dsplice <bag> pass=N')
+    out = os.path.join(ROOT, 'logs/day1/cone_passes_%s.png' % time.strftime('%H%M%S'))
+    fig.savefig(out, dpi=105, bbox_inches='tight')
+    print('  picture:', out)
 
 
 def grid(d):
@@ -257,6 +329,26 @@ def do_map(newd, mapd, route):
         out[k] = np.concatenate([oz[k][keep], nz[k][take]])
     np.savez(os.path.join(mapd, 'map_clean.npz'), **out)
     print('map_clean.npz: cone box points %d old -> %d new' % (int((~keep).sum()), int(take.sum())))
+    patch_3d(newd, mapd, box)
+
+
+def patch_3d(newd, mapd, box):
+    """The full 3D map too (map_track.npz/pcd, what RViz and map_build use): inside the cone box (+0.3 m) the new
+    drive's points, then map_build --clean rebuilds map_clean.*, map.pgm and map_top.png from it, so every display
+    shows the same cones."""
+    ot, nt = np.load(os.path.join(mapd, 'map_track.npz')), np.load(os.path.join(newd, 'map_track.npz'))
+    keep = ~in_box(ot['xyz'][:, :2], box, 0.3)
+    take = in_box(nt['xyz'][:, :2], box, 0.3)
+    out = {k: ot[k] for k in ot.files}
+    for k in ('xyz', 'count', 'height'):
+        out[k] = np.concatenate([ot[k][keep], nt[k][take]])
+    np.savez(os.path.join(mapd, 'map_track.npz'), **out)
+    sys.path.insert(0, os.path.join(ROOT, 'scripts'))
+    import map_build
+    map_build.write_pcd(os.path.join(mapd, 'map_track.pcd'), out['xyz'], out['count'])
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'scripts/map_build.py'), '--clean', mapd], capture_output=True, text=True)
+    print('map_track: cone box points %d old -> %d new; map_build --clean: %s'
+          % (int((~keep).sum()), int(take.sum()), (r.stdout + r.stderr).strip().splitlines()[-1:] or ''))
 
 
 def main():
