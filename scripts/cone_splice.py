@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Cones moved, the rest of the course did not: replace only the cone stretch of the routes (and of the map).
 
-    python3 scripts/cone_splice.py route <raw.csv> [route=rec105326_lap1] [other=rec105326_lap2] [pin=0.25]
+    python3 scripts/cone_splice.py route <raw.csv> [route=rec105326_lap1] [other=rec105326_lap2] [pin=0.25] [pass=1]
+    python3 scripts/cone_splice.py passes <raw.csv> <new map dir>     every pass through the cones: time, length,
+                                                                      nearest map cell (the cones) — to choose pass=N
     python3 scripts/cone_splice.py map <new map dir> [map=maps/coshow_1119]
                                                                       (scripts/cone_splice.sh <bag> does both)
-route: <raw.csv> = a short drive with the remote from the start mark through the new cones until out of the cone
+route: <raw.csv> = a drive with the remote from the start mark through the new cones until out of the cone box
+  (several passes in one recording are fine: back to the start mark and through again; pass=N picks one).
+  Old text: <raw.csv> = a short drive with the remote from the start mark through the new cones until out of the cone
   box (route_from_bag.py output, track frame). The routes' pins from the start up to where they leave the cone box
   (the 'cones' zone of <route>.zones.json) are replaced by that drive, resampled every `pin` m (light smoothing,
   +-1 pin); the rest stays. The old file is kept as .bak_HHMMSS.csv (route_edit / route_sync convention) and the
@@ -66,7 +70,38 @@ def resample(R, step):
     return Q
 
 
-def do_route(raw, route, other, step):
+def passes(R, P, box, k, speed=None):
+    """[(start index, last index inside the box)] for every pass: leaves the start mark (within 0.6 m of the route
+    start) and goes out of the cone box near where the old route leaves it (P[k])."""
+    at_start = np.hypot(R[:, 0] - P[0, 0], R[:, 1] - P[0, 1]) < 0.6
+    near_exit = (~in_box(R, box)) & (np.hypot(R[:, 0] - P[k, 0], R[:, 1] - P[k, 1]) < 0.8)
+    out, i = [], 0
+    while i < len(R):
+        st = np.nonzero(at_start[i:])[0]
+        if not len(st):
+            break
+        a = i + int(st[0])
+        ex = np.nonzero(near_exit[a:])[0]
+        if not len(ex):
+            break
+        e = a + int(ex[0])
+        j = e - 1                                             # the stay at the start mark right before this pass
+        while j > i and not at_start[j]:
+            j -= 1
+        j0 = j
+        while j0 > i and at_start[j0 - 1]:
+            j0 -= 1
+        run = np.arange(j0, j + 1)
+        if speed is not None and (speed[run] < 0.05).any():
+            a = int(run[speed[run] < 0.05].max())               # where it last stood still (the start mark it was put on)
+        else:
+            a = int(run[np.argmin(np.hypot(R[run, 0] - P[0, 0], R[run, 1] - P[0, 1]))])
+        out.append((a, e - 1))
+        i = e + 1
+    return out
+
+
+def do_route(raw, route, other, step, pass_no=1):
     D = np.genfromtxt(raw, delimiter=',', names=True)
     R = np.column_stack([D['x_m'], D['y_m']])
     box = cone_box(route)
@@ -81,14 +116,12 @@ def do_route(raw, route, other, step):
     # the new drive: from where it stood (start mark) until it leaves the box for good, plus the first point outside
     if not in_box(R[:1], box)[0]:
         sys.exit('★ the drive does not start in the cone box %s (start %.2f, %.2f) — wrong recording?' % (box, *R[0]))
-    # where it leaves: the first time it is out of the box near where the old route leaves it (P[k]) — brushing the
-    # box edge elsewhere does not count, and a whole lap (back to the start, inside the box again) works too
-    inside = in_box(R, box)
-    near_exit = (~inside) & (np.hypot(R[:, 0] - P[k, 0], R[:, 1] - P[k, 1]) < 0.8)
-    if not near_exit.any():
-        sys.exit('★ the drive never leaves the cone box near where %s does (%.2f, %.2f) — drive on until past the cones'
-                 % (route, P[k, 0], P[k, 1]))
-    last_in = int(np.argmax(near_exit)) - 1
+    ps = passes(R, P, box, k, D['speed_mps'] if 'speed_mps' in D.dtype.names else None)
+    if pass_no > len(ps):
+        sys.exit('★ pass %d not found (%d passes from the start mark out of the cone box)' % (pass_no, len(ps)))
+    a0, last_in = ps[pass_no - 1]
+    R = R[a0:]
+    last_in -= a0
     d0 = float(np.hypot(*(R[0] - P[0])))
     if d0 > 1.0:
         sys.exit('★ the drive starts %.2f m from the route start — not the same start mark?' % d0)
@@ -136,6 +169,29 @@ def picture(route, other, P_old, R, box):
     out = os.path.join(ROOT, 'logs/day1/cone_splice_%s.png' % time.strftime('%H%M%S'))
     fig.savefig(out, dpi=105, bbox_inches='tight')
     print('picture:', out)
+
+
+def show_passes(raw, newd, route):
+    D = np.genfromtxt(raw, delimiter=',', names=True)
+    R = np.column_stack([D['x_m'], D['y_m']])
+    box = cone_box(route)
+    _, P = load_pins(os.path.join(RDIR, route + '.csv'))
+    k = 1
+    while k < len(P) and in_box(P[k:k + 1], box)[0]:
+        k += 1
+    img, _, res, org = grid(newd)
+    C = cells(img, res, org)
+    C = C[in_box(C, box, 0.0) & (np.abs(C[:, 0]) < 4.2) & (np.abs(C[:, 1]) < 3.2)]
+    tree = cKDTree(C) if len(C) else None
+    ps = passes(R, P, box, k, D['speed_mps'] if 'speed_mps' in D.dtype.names else None)
+    print('%d pass(es) from the start mark out of the cone box:' % len(ps))
+    for n, (a, e) in enumerate(ps, 1):
+        seg = R[a:e + 1]
+        L = float(np.hypot(*np.diff(seg, axis=0).T).sum())
+        dmin = float(tree.query(seg)[0].min()) if tree is not None else float('nan')
+        print('  pass=%d: %.0f s, %.1f m, nearest cone (map cell) %.2f m%s'
+              % (n, D['t_s'][e] - D['t_s'][a], L, dmin, '  ★ close' if dmin < 0.25 else ''))
+    print('  the route uses pass=1 unless given: dsplice <bag> pass=N (the slow steps are not repeated)')
 
 
 def grid(d):
@@ -209,7 +265,9 @@ def main():
     pos = [x for x in a if '=' not in x]
     route = kv.get('route', 'rec105326_lap1')
     if pos[:1] == ['route'] and len(pos) == 2:
-        do_route(pos[1], route, kv.get('other', 'rec105326_lap2'), float(kv.get('pin', 0.25)))
+        do_route(pos[1], route, kv.get('other', 'rec105326_lap2'), float(kv.get('pin', 0.25)), int(kv.get('pass', 1)))
+    elif pos[:1] == ['passes'] and len(pos) == 3:
+        show_passes(pos[1], pos[2], route)
     elif pos[:1] == ['map'] and len(pos) == 2:
         do_map(pos[1], os.path.join(ROOT, kv.get('map', 'maps/coshow_1119')), route)
     else:
