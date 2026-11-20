@@ -15,6 +15,7 @@ export CYCLONEDDS_URI=${CYCLONEDDS_URI:-file://$ROOT/config/cyclonedds_go2.xml}
 export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
 has(){ printf '%s\n' "$@" | grep -q "^$1="; }
 r=rec105326_lap1; A=()
+ZZ=0; B=(); for kv in "$@"; do [ "$kv" = zz ] && ZZ=1 || B+=("$kv"); done; set -- "${B[@]}"   # zz = zigzag-edited copy of the route (R_lapN -> Rzz_lapN), the original route untouched
 for kv in "$@"; do
   case $kv in
     route=*) r=${kv#*=};;
@@ -24,6 +25,7 @@ for kv in "$@"; do
     *) echo "★ unknown argument $kv (key=value)"; exit 1;;
   esac
 done
+[ "$ZZ" = 1 ] && r=${r/_lap/zz_lap}
 f=$LOG/routes/$r.csv; [ -f "$f" ] || f=$ROOT/routes/$r.csv
 [ -f "$f" ] || { echo "★ no route $r"; exit 1; }
 echo "route: $f"

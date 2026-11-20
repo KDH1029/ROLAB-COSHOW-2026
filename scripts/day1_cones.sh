@@ -23,10 +23,11 @@ env_ros() {   # the same environment as day1.sh
 case "${1:-}" in
   run)
     env_ros; shift
+    ZZ=0; B=(); for kv in "$@"; do [ "$kv" = zz ] && ZZ=1 || B+=("$kv"); done; set -- "${B[@]}"   # zz = zigzag-edited copy of the route (R_lapN -> Rzz_lapN), the original route untouched
     A=(); for kv in "$@"; do
       case $kv in
         in|out) A+=(-p "lane:=$kv");;
-        route=*) r=${kv#*=}; f=$LOG/routes/$r.csv
+        route=*) r=${kv#*=}; [ "$ZZ" = 1 ] && r=${r/_lap/zz_lap}; f=$LOG/routes/$r.csv
                  [ -f "$f" ] || f=$ROOT/routes/$r.csv
                  [ -f "$f" ] || { echo "★ no route $r in $LOG/routes or $ROOT/routes"; exit 1; }
                  echo "route: $f"; A+=(-p "path_file:=$f");;
