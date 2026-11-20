@@ -14,7 +14,7 @@ Differences from the runner:
     fit is wrong there: it does not start and says so (11-19 bag: start mark 93 vs 2 %, past the cones 94 vs 9 %,
     right in front of the zigzag the wall fit is 1.9 m off — 1 m further back it is fine, 85 vs 4 %)
   - lap end: at the route's start station + end_extra (0 m) instead of one lap + extra
-  - zigzag_v=<m/s>: the zigzag zone's speed for this run only (the zones file keeps its 0.4)
+  - zigzag_v / cones_v=<m/s>: now the runner's own (day1_runner_node), works here too
   - lock=auto (default): the position kept by dkeep (track_keep_node, from the start mark) if it is from this FAST-LIO
     run and < 15 min old, else the wall fit; lock=keep / lock=walls to force one
 Everything else (light, zones, hula hoop, keys, debug) is the runner's.
@@ -175,8 +175,6 @@ class PracticeRunner(R.Day1Runner):
         def p(name, default):
             return self.declare_parameter(name, default, ParameterDescriptor(dynamic_typing=True)).value
         self.end_extra = float(p('end_extra', 0.0))
-        self.zigzag_v = float(p('zigzag_v', 0.0))         # 0 = the zones file's value
-        self.zone_override()
         if self.mode != 'wall' or not self.path_file:
             raise SystemExit('practice runner: a route is needed (route=<name>)')
         self.wlock = AnyStartLock(self.lane, n=self.lock_n, max_lat=self.max_lat, max_head_deg=self.max_head,
@@ -223,13 +221,6 @@ class PracticeRunner(R.Day1Runner):
             return None, 'the kept position is %.0f min old (FAST-LIO drifts) — dkeep again' % (age / 60)
         return (k['T_track_odom'], 'kept %.0f s ago, FAST-LIO pid %s' % (age, pid)), ''
 
-    def zone_override(self):
-        if self.zigzag_v > 0:
-            for z in self.zones:
-                if z.get('name') == 'zigzag':
-                    z['v'] = self.zigzag_v
-                    self.get_logger().info('★ PRACTICE: zigzag v %.2f for this run (zones file unchanged)' % self.zigzag_v)
-
     def cb_lidar(self, m):
         if self.state == 'LOCK' and self.plan is None and self.n_frames % 2 == 1:     # the frame the runner will use
             self.wlock.scan = WA.lidar_to_base(pc2.read_points_numpy(m, field_names=('x', 'y', 'z'), skip_nans=True))
@@ -249,7 +240,6 @@ class PracticeRunner(R.Day1Runner):
     def look_switch(self, name, why, s_r):
         end_left = self.plan.s_end - s_r
         super().look_switch(name, why, s_r)
-        self.zone_override()                         # the new branch's zones were read from its file
         if self.plan is not None and self.end_set:   # new branch: still stop at the start (same distance to go)
             sn = self.prog.s
             L = self.loop.length

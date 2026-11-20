@@ -120,6 +120,8 @@ class Day1Runner(Node):
                 raise SystemExit('light=none needs debug=true (competition: the start must come from the light)')
         self.look_timeout = float(p('look_timeout', 10.0).value)   # s without the hoop vision, then a random branch
         self.light_timeout = float(p('light_timeout', 0.0).value)   # s waiting for GREEN, then go anyway; 0 = never (default, 11-20)
+        # this run only, the zones file unchanged (11-20 speed tests): zigzag_v / cones_v m/s, 0 = the file's value
+        self.zone_v = {'zigzag': float(p('zigzag_v', 0.0).value), 'cones': float(p('cones_v', 0.0).value)}
         self.wait_t = None
         if self.mode not in ('wall', 'vision'):
             raise SystemExit('mode must be wall or vision')
@@ -133,6 +135,7 @@ class Day1Runner(Node):
         zf = self.path_file[:-4] + '.zones.json' if self.path_file.endswith('.csv') else ''
         if zf and os.path.exists(zf):
             self.zones = json.load(open(zf))
+        self.apply_zone_v()
         # hoop=in|out: the branch is known before the run — take that route now, no stop, no vision
         if self.hoop in ('in', 'inner', 'out', 'outer'):
             lz = next((z for z in self.zones if z.get('type') == 'look'), None)
@@ -147,6 +150,7 @@ class Day1Runner(Node):
                 self.loop = TP.load_pins(f, self.lane)
                 zf = f[:-4] + '.zones.json'
                 self.zones = json.load(open(zf)) if os.path.exists(zf) else []
+                self.apply_zone_v()
             self.look_done = True
             self.get_logger().info('hoop %s: route %s from the start (no look, no vision)' % (self.hoop, pick))
         self.wlock = TP.StartLock(self.lane, n=self.lock_n, max_lat=self.max_lat, max_head_deg=self.max_head,
@@ -262,6 +266,14 @@ class Day1Runner(Node):
                   else ParameterValue(type=ParameterType.PARAMETER_DOUBLE, double_value=float(v)))
             req.parameters.append(ParamMsg(name='FollowPath.' + k, value=pv))
         self.cli_param.call_async(req)
+
+    def apply_zone_v(self):
+        """zigzag_v / cones_v given on the command line: that zone's speed for this run (the file keeps its value)."""
+        for z in self.zones:
+            v = self.zone_v.get(z.get('name'), 0.0)
+            if v > 0 and z.get('v') != v:
+                self.get_logger().info('★ zone %s: v %.2f for this run (file: %s)' % (z['name'], v, z.get('v')))
+                z['v'] = v
 
     def zone_at(self, x, y, margin=0.3):
         for z in self.zones:
@@ -509,6 +521,7 @@ class Day1Runner(Node):
             self.loop, self.path_file = loop, f
             zf = f[:-4] + '.zones.json'
             self.zones = json.load(open(zf)) if os.path.exists(zf) else []
+            self.apply_zone_v()
             self.zone = None
             self.plan = TP.LanePlan(self.lane, s0, self.lock_res['lateral'], extra=self.extra, blend_m=self.blend_m, loop=loop)
             tp = self.track_pose(self.pose_at(None))
