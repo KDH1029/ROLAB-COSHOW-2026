@@ -123,6 +123,7 @@ class Day1Runner(Node):
         # this run only, the zones file unchanged (11-20 speed tests): zigzag_v / cones_v m/s, 0 = the file's value
         self.zone_v = {'zigzag': float(p('zigzag_v', 0.0).value), 'cones': float(p('cones_v', 0.0).value)}
         self.wait_t = None
+        self.finish_t = None
         if self.mode not in ('wall', 'vision'):
             raise SystemExit('mode must be wall or vision')
 
@@ -810,9 +811,15 @@ class Day1Runner(Node):
                     return
                 if self.state == 'RUN' and self.plan.s_end - s_r < 0.25:
                     self.state = 'FINISH'
+                    self.finish_t = t
                     self.get_logger().info('lap done: %.2f m along the lane in %.1f s'
                                            % (s_r - self.plan.s_start, t - self.t_go))
                     self.bench_report(s_r - self.plan.s_start, t - self.t_go)
+                # 11-20: the runner stops the robot itself at the lap end — RPP alone never called the goal reached when
+                # the robot ended 0.10-0.15 m beside the path end, and turned in place into a cone
+                if self.state == 'FINISH' and (self.plan.s_end - s_r < 0.12 or t - self.finish_t > 2.5):
+                    self.end_stop('at the end' if self.plan.s_end - s_r < 0.12 else '%.1f s after the lap' % (t - self.finish_t))
+                    return
             else:
                 s_r = self.prog.s
             # only 6 m ahead: the whole lap + extra ends where the robot is 1.2 m after the start, and RPP calls a
@@ -868,9 +875,21 @@ class Day1Runner(Node):
     def _goal_done(self, fut):
         st = fut.result().status
         if self.state == 'FINISH' and st == GoalStatus.STATUS_SUCCEEDED:
-            self.get_logger().info('stopped at the lap end')
-            self.state = 'DONE'
-            self.sport(API_STOPMOVE)
+            self.end_stop('RPP reached the end')
+
+    def end_stop(self, why):
+        """Lap over: cancel the path, zero /cmd_vel, StopMove, motor bridge off — nothing moves the robot after this."""
+        if self.state == 'DONE':
+            return
+        self.state = 'DONE'
+        if self.goal_handle is not None:
+            self.goal_handle.cancel_goal_async()
+            self.goal_handle = None
+        for _ in range(3):
+            self.pub_cmd.publish(Twist())
+        self.sport(API_STOPMOVE)
+        self.bridge_state(False)
+        self.get_logger().info('■ stopped at the lap end (%s) — motor bridge off. q = quit' % why)
 
     def stop(self, why):
         self.state = 'STOP'
