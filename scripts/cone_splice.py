@@ -158,6 +158,22 @@ def do_route(raw, route, other, step, pass_no=1):
     if d0 > 1.0:
         sys.exit('★ the drive starts %.2f m from the route start — not the same start mark?' % d0)
     N = resample(R[:last_in + 1], step)                # the old pins take over from the first one outside the box
+    # where to rejoin the route: a pin AHEAD of where the pass leaves the field (in its exit direction), near and well
+    # aligned (score = distance x (2 - cos)^2); the plain 'first pin out of the field' can lie behind it (pass exits elsewhere)
+    ex = N[-1] - N[max(0, len(N) - 4)]
+    ex = ex / max(1e-9, float(np.hypot(*ex)))
+    best = None
+    for j in range(k, min(len(P), k + 8)):
+        v = P[j] - N[-1]
+        dist = float(np.hypot(*v))
+        cos = float(np.dot(v, ex) / max(1e-9, dist))
+        if dist < 0.15 or cos > 0.3:
+            sc = dist * (2.0 - cos) ** 2
+            if best is None or sc < best[0]:
+                best = (sc, j)
+    if best is not None and best[1] != k:
+        print('rejoin at pin %d (%.2f, %.2f) instead of %d: ahead of the exit' % (best[1] + 1, P[best[1], 0], P[best[1], 1], k + 1))
+        k = best[1]
     gap = float(np.hypot(*(N[-1] - P[k])))
     if gap > 1.6:
         sys.exit('★ the drive leaves the cone field %.2f m from where %s does — different exit?' % (gap, route))
