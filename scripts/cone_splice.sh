@@ -8,6 +8,7 @@
 # Afterwards: deditin to look (s saves), dself for the fake-robot check, then real runs.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+set +u; source /opt/ros/jazzy/setup.bash; source "$ROOT/install/setup.bash" 2>/dev/null; set -u   # rosbag2_py (bag readers)
 BAG=$(readlink -f "${1:?bag dir}"); NAME=$(basename "$BAG"); PASS=${2:-pass=1}
 W=$ROOT/logs/cone_splice/$NAME; mkdir -p "$W"
 RAW=$ROOT/maps/coshow_1119/routes/splice_$NAME/raw.csv
