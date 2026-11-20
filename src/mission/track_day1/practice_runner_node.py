@@ -64,6 +64,14 @@ class AnyStartLock(TP.StartLock):
     mtree = None       # map_inside_tree
     twin_info = ''
 
+    def fit(self, tw):
+        """How badly the robot would sit on the route for wall result tw: |lateral| + 0.5 |heading| (m, rad)."""
+        q = TP.compose(self.off_inv, tw)
+        lat, _, s = TP.lateral_of(self.loop, q[0], q[1])
+        a, b = self.loop.pose_at(s), self.loop.pose_at(s + 0.5)
+        head = TP.wrap(q[2] - math.atan2(b[1] - a[1], b[0] - a[0]))
+        return abs(lat) + 0.5 * abs(head)
+
     def map_score(self, tw):
         if self.scan is None or self.mtree is None:
             return None
