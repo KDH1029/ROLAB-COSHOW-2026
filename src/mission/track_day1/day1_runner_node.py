@@ -336,7 +336,30 @@ class Day1Runner(Node):
         self.light_state = st
         self.gate.feed(st, self.now_s())
 
+    def regait_tick(self, t):
+        """After the look point: BalanceStand, then the run's gait again, then on (still standing meanwhile)."""
+        g = self.regait
+        self.pub_cmd.publish(Twist())
+        if g['step'] == 0:
+            self.sport(API_BALANCESTAND)
+            g.update(step=1, t=t)
+        elif g['step'] == 1 and t - g['t'] > 0.5:
+            self.sport(self.gait_api, self.gait_param)
+            g.update(step=2, t=t)
+        elif g['step'] == 2 and (g['ok'] is not None or t - g['t'] > 1.5):
+            if g['ok'] is False and g['tries'] < 2:
+                g.update(step=0, t=t, tries=g['tries'] + 1, ok=None)
+                return
+            self.get_logger().info('gait %s again after the look point: %s' % (
+                self.gait_name, {True: 'OK', False: '★ refused', None: 'no answer (sent)'}[g['ok']]))
+            self.state = 'RUN'
+            self.last_goal_t = 0.0
+
     def cb_resp(self, m):
+        if (m.header.identity.api_id == self.gait_api and self.state == 'REGAIT'
+                and getattr(self, 'regait', None) and self.regait['step'] == 2):
+            self.regait['ok'] = m.header.status.code == 0
+            return
         if m.header.identity.api_id == self.gait_api and self.state == 'GAIT' and self.gait_step == 2:
             if m.header.status.code == 0:
                 self.get_logger().info('gait %s (%d) OK' % (self.gait_name, self.gait_api))
@@ -532,8 +555,14 @@ class Day1Runner(Node):
             self.get_logger().info('route now %s: %.2f m/lap, %.1f m done, %.1f m to go' % (name, loop.length, sn - s0, self.plan.s_end - sn))
         self.look['step'] = 'done'
         self.look_done = True
-        self.state = 'RUN'
         self.last_goal_t = 0.0
+        if self.gait:
+            # 11-20: standing at the look point the motor bridge sent StopMove, which may reset most sport settings —
+            # put the gait (ClassicWalk) back before walking on: BalanceStand -> 0.5 s -> gait -> answer (or 1.5 s)
+            self.regait = dict(step=0, t=self.now_s(), tries=0, ok=None)
+            self.state = 'REGAIT'
+        else:
+            self.state = 'RUN'
 
     def look_tick(self, t, tp, s_r):
         """LOOK: turn to face the hoops (direct /cmd_vel), ask the vision, pick the branch."""
@@ -782,6 +811,10 @@ class Day1Runner(Node):
             elif self.state == 'LEGS':
                 self.prog.feed(tp[0], tp[1])
                 self.legs_tick(t, tp)
+                return
+            elif self.state == 'REGAIT':
+                self.prog.feed(tp[0], tp[1])
+                self.regait_tick(t)
                 return
             elif self.state in ('RUN', 'FINISH'):
                 if self.state == 'RUN' and t - self.t_go < 3.0 and t - self.cam_pub_t > 1.0:
