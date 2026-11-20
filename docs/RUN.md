@@ -25,8 +25,8 @@
 | 경기 | 별칭 | 명령 |
 |---|---|---|
 | 출발 정렬 (미션 코스, 주행 전에) | `dalign` | `day1_align.sh route=rec105326_lap1` |
-| 1일차 트랙, 인코스 | `din` | `day1.sh run in v=0.8` |
-| 1일차 트랙, 아웃코스 | `dout` | `day1.sh run out v=0.8` |
+| 1일차 트랙, 인코스 (끝남, 별칭 없음) | – | `day1.sh run in v=0.8` |
+| 1일차 트랙, 아웃코스 (끝남, 별칭 없음) | – | `day1.sh run out v=0.8` |
 | 미션 코스 (빨강을 받았을 때) | `dred` | `day1.sh run route=rec105326_lap1 hoop=red v=0.8` |
 | 미션 코스 (노랑을 받았을 때) | `dyellow` | `day1.sh run route=rec105326_lap1 hoop=yellow v=0.8` |
 | 미션 코스, 갈래를 미리 정함 (안쪽 / 바깥쪽) | `dhin` / `dhout` | `day1.sh run route=rec105326_lap1 hoop=in v=0.8` / `hoop=out` |
