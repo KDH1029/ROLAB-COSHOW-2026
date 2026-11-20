@@ -16,6 +16,7 @@ States
   FINISH path ends at one lap + extra; Nav2 stops at its end
   STOP   emergency (key), goal cancelled, bridge deactivated, StopMove
 """
+import atexit
 import json
 import math
 import os
@@ -901,6 +902,8 @@ def key_loop(node):
     if not os.isatty(fd):
         return
     old = termios.tcgetattr(fd)
+    # 데몬 스레드라 프로그램이 끝날 때 아래 finally 가 안 돌 수 있다 → 터미널이 글자 안 보이는 모드로 남음(11-20). 끝날 때 꼭 되돌림
+    atexit.register(termios.tcsetattr, fd, termios.TCSADRAIN, old)
     try:
         tty.setcbreak(fd)
         while rclpy.ok():

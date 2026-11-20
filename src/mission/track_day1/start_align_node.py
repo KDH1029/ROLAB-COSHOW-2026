@@ -20,6 +20,7 @@ Needs `day1.sh up` (FAST-LIO, motor bridge configured) and `day1.sh xt16`. Robot
 ★ It moves the robot: run it yourself; space / x / q / Ctrl+C = stop.
 Parameters: path_file (route csv), lane 2, tol_lat 0.03 m, tol_head 3 deg, max_lat 0.6, max_head 60, gait classic|none
 """
+import atexit
 import math
 import os
 import select
@@ -311,6 +312,8 @@ def key_loop(node):
     if not os.isatty(fd):
         return
     old = termios.tcgetattr(fd)
+    # 데몬 스레드라 프로그램이 끝날 때 아래 finally 가 안 돌 수 있다 → 터미널이 글자 안 보이는 모드로 남음(11-20). 끝날 때 꼭 되돌림
+    atexit.register(termios.tcsetattr, fd, termios.TCSADRAIN, old)
     try:
         tty.setcbreak(fd)
         while rclpy.ok() and not node.done:

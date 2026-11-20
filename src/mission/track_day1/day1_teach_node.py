@@ -9,6 +9,7 @@
   Run it:  day1.sh run in route=<name>
 The route is stored in the track frame (from the wall), so a later start placed a bit differently still uses it.
 """
+import atexit
 import math
 import os
 import select
@@ -192,6 +193,8 @@ def key_loop(node):
     if not os.isatty(fd):
         return
     old = termios.tcgetattr(fd)
+    # 데몬 스레드라 프로그램이 끝날 때 아래 finally 가 안 돌 수 있다 → 터미널이 글자 안 보이는 모드로 남음(11-20). 끝날 때 꼭 되돌림
+    atexit.register(termios.tcsetattr, fd, termios.TCSADRAIN, old)
     try:
         tty.setcbreak(fd)
         while rclpy.ok() and not node.done:
