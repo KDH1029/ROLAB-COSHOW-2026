@@ -2,7 +2,7 @@
 
 Unitree Go2 EDU 사족보행 로봇의 자율주행 스택(ROS 2)입니다. 2026 CO-SHOW 4족보행 로봇경진대회 자율주행 부문에 참가했습니다.
 
-실제 주행 명령은 [docs/RUN.md](docs/RUN.md)에 있습니다. 준비, 회차마다 할 일, 끝내기, 키, 문제 해결 순서로 적었습니다.
+실행 방법은 [docs/RUN.md](docs/RUN.md)(빌드, 준비, 회차마다, 연습, 점검, 경로 손보기, 문제 해결), 코드 구조는 [docs/STRUCTURE.md](docs/STRUCTURE.md)(프로세스, 토픽, 패키지, 주행기 상태, 데이터 파일)에 있습니다.
 
 ## 대회
 
@@ -56,7 +56,8 @@ ROLAB-COSHOW-2026/
 
 | 문서 | 내용 |
 |---|---|
-| [docs/RUN.md](docs/RUN.md) | 실제 주행 명령, 주행기 흐름, 키, 문제 해결 |
+| [docs/RUN.md](docs/RUN.md) | 빌드, 실행 명령과 인자 전체, 주행기 흐름, 키, 문제 해결 |
+| [docs/STRUCTURE.md](docs/STRUCTURE.md) | 프로세스·토픽·좌표계, 패키지와 파일, 주행기 상태, 경로·구간·지도 파일 형식 |
 | [docs/CONES.md](docs/CONES.md) | 콘 배치가 바뀌었을 때 쓰는 콘 회피 주행기 |
 | [docs/01_1일차_트랙레이스.md](docs/01_1일차_트랙레이스.md) | 1일차 트랙 경기 분석과 설계 |
 | [docs/02_3일차_미션수행.md](docs/02_3일차_미션수행.md) | 3일차 미션 경기 분석과 설계 |
