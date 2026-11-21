@@ -1,96 +1,72 @@
 # ROLAB-COSHOW-2026
 
-Unitree Go2 EDU 사족보행 로봇 자율주행 및 트랙 레이싱 스택 (ROS 2).  
-2026 CO-SHOW 4족보행 로봇경진대회(자율주행 부문) 참가 프로젝트.
+Unitree Go2 EDU 사족보행 로봇의 자율주행 스택(ROS 2)입니다. 2026 CO-SHOW 4족보행 로봇경진대회 자율주행 부문에 참가했습니다.
 
-**실제 주행 명령은 [docs/RUN.md](docs/RUN.md)** (준비 → 회차마다 → 끝내기, 키, 문제 해결).
+실제 주행 명령은 [docs/RUN.md](docs/RUN.md)에 있습니다. 준비, 회차마다 할 일, 끝내기, 키, 문제 해결 순서로 적었습니다.
 
----
+## 대회
 
-## 1. 대회 개요 (Overview)
+- 대회: 2026 CO-SHOW 4족보행 로봇경진대회 (공유대학 SHARE 주관), 자율주행 부문
+- 1일차 트랙 기록 경기(30%): 9 × 7 m 트랙, 900 mm 레인을 한 바퀴 돕니다. 인레인과 아웃레인 최단 기록을 합산합니다.
+- 3일차 미션 경기(70%): 라바콘, 색상 아치(훌라후프), 경사로, 타이어, 700 mm 협소 통로를 지나 완주합니다.
+- 연산은 로봇 위에서만 합니다. 경기 중 무선 조종은 할 수 없고, 출발은 신호등 녹색을 스스로 인식해야 합니다.
+- 사전에 입력한 경로를 센서 피드백으로 따라가는 방식이 허용됩니다(규정 4.4조).
 
-* **대회명**: 2026 CO-SHOW 4족보행 로봇경진대회 (공유대학 SHARE 주관)
-* **참가 부문**: 자율주행 부문 (종합 점수 = 1일차 30% + 3일차 70%)
-* **경기 구성**:
-  1. **1일차 본선 (30%, 100점 만점)**: 트랙 기록 경기 (9,000 × 7,000 mm 트랙, 900 mm 레인 1바퀴 최단 시간 완주, 인/아웃레인 최단 기록 합산)
-  2. **2일차 예선**: 장애물 회피 및 미션수행 경기 예선 (단판, 본선 순서 결정)
-  3. **3일차 본선 (70%, 150점 만점)**: 장애물 회피 및 5종 미션 수행 (라바콘, 색상 아치, 경사 장애물, 타이어 구간, 700 mm 협소 통로, 완주)
-* **핵심 규정**:
-  - 온보드 완결형 연산 (외부 연산 및 경기 중 무선 제어 일체 불가)
-  - **신호등 녹색 출발 신호 자체 인식 필수** (수동 출발 불가, 부정출발 3회 시 실격)
-  - **사전 입력 경로 및 센서 피드백 기반 궤적 제어 공식 허용** (규정 제4.4조)
-  - 기체 통과 제한 높이: 색상 아치 기준 **800 mm 이하**
+## 하드웨어
 
----
-
-## 2. 하드웨어 및 시스템 사양 (System Specs)
-
-| 구성 | 모델 / 사양 | 역할 |
+| 구성 | 모델 | 역할 |
 |---|---|---|
-| **로봇 플랫폼** | Unitree Go2 EDU | 사족보행 이동체, 몸통 IMU (500 Hz), 다리 오도메트리 (150 Hz) |
-| **주 라이다** | Hesai XT16 (16채널 3D LiDAR, 20 Hz) | FAST-LIO2 위치추정, 2D 레이저 스캔 생성, 장애물 감지 |
-| **보조 센서** | Go2 내장 L1 LiDAR, Intel RealSense D435i | 지면 근접 장애물 탐지, 신호등 및 색상 아치 비전 인식 |
-| **주 연산 장치** | Intel NUC (Core Ultra 7, 16코어, Ubuntu 24.04, ROS 2 Jazzy) | 위치추정(SLAM/AMCL), 경로 계획, 트랙 추종, 전체 미션 FSM |
-| **온보드 비전** | Jetson Orin NX (로봇 내부 PC, JetPack 5, ROS 2 Foxy) | 카메라 영상 취득, YOLOv8 신호등 및 색상 아치 실시간 추론 (TensorRT) |
+| 로봇 | Unitree Go2 EDU | 보행, 몸통 IMU 500 Hz |
+| 라이다 | Hesai XT16 (16채널, 20 Hz) | FAST-LIO 오도메트리, 벽 정합, 세로 스캔 |
+| 카메라 | Intel RealSense D435i | 신호등, 훌라후프 색 인식 |
+| 주 연산 | Intel NUC (Core Ultra 7, Ubuntu 24.04, ROS 2 Jazzy) | 위치추정, 경로 추종, 주행 판단 |
+| 내부 PC | Jetson Orin NX (JetPack 5, ROS 2 Foxy) | 카메라, YOLO 추론 (TensorRT FP16) |
 
----
+## 주행 방식
 
-## 3. 디렉토리 구조 (Directory Structure)
+1. **위치추정**: FAST-LIO가 odom → base_link를 냅니다. 출발할 때 라이다 스캔을 9 × 7 m 경기장 벽에 맞춰 트랙 좌표를 한 번 잡습니다(`wall_align`).
+2. **출발 정렬**: `start_align_node`가 경로 방향으로 제자리에서 돌고, 옆걸음으로 경로 위에 올라선 뒤 멈춥니다.
+3. **출발**: 내부 PC의 YOLO 신호등 노드가 녹색을 보면 출발합니다.
+4. **경로 추종**: 리모컨으로 한 번 몰아 기록한 경로(`routes/*.csv`)를 Nav2 Regulated Pure Pursuit로 따라갑니다. 0.2초마다 6 m 앞까지 보냅니다.
+5. **구간 속도**: `routes/<경로>.zones.json`에 구간마다 속도와 앞보기 거리를 적습니다. 지그재그와 라바콘 구간은 느리게 갑니다.
+6. **색상 아치**: 보는 자리에서 지정 색 훌라후프의 방향을 YOLO로 잽니다. 그 방향에 있는 훌라후프로 가는 갈래(lap1 안쪽 / lap2 바깥쪽)로 경로를 바꿉니다.
+7. **끝**: 한 바퀴를 마치면 주행기가 직접 목표를 취소하고 정지 명령을 보낸 뒤 모터 브리지를 끕니다.
+
+## 디렉토리
 
 ```
 ROLAB-COSHOW-2026/
-├── README.md                 # 프로젝트 개요 및 운영 가이드
-├── .gitignore
-├── docs/                     # 대회 분석 및 기술 설계 문서
-│   ├── rulebook/             # 공식 규정집 PDF 보관
-│   ├── 01_1일차_트랙레이스.md   # 900mm 레인 고속 주행 전략 및 궤적 추종 설계
-│   └── 02_3일차_미션수행.md     # 색상아치, 700mm 협소통로, 타이어 구간 대응 설계
-├── src/                      # ROS 2 워크스페이스 소스코드
-│   ├── core/                 # 하드웨어 제어 및 센서 인터페이스
-│   │   ├── go2_bridge/       # Sport API, IMU, 요 드리프트 피드포워드 보정
-│   │   └── hesai_ros_driver/ # Hesai XT16 라이다 드라이버
-│   ├── localization/         # cm급 초정밀 위치추정
-│   │   ├── fast_lio/         # 다리 속도 결합 및 모션 게이팅 포크
-│   │   ├── go2_localization/ # AMCL 설정 및 맵 서버
-│   │   └── start_align/      # 기립 직후 3초 스캔 자동 정렬
-│   ├── navigation/           # 주행 및 제어 (2가지 모드)
-│   │   ├── sprint_follower/  # [1일차] 900mm 레인 최고속도 Pure Pursuit 추종기
-│   │   └── ego_planner/      # [3일차] 700mm 초협소 통로 동적 팽창 지원 플래너
-│   └── vision/               # Jetson Orin NX 온보드 비전
-│       ├── start_light/      # [공통 필수] 출발선 녹색 신호등 자동 인식 출발 노드
-│       └── color_arch/       # [3일차] 추첨 색상 아치 판별 및 진입점 선택 노드
-├── maps/                     # 9m x 7m 경기장 도면 기반 맵 파일
-│   ├── track_lane.yaml       # 1일차 2개 레인 트랙 맵
-│   └── arena_obstacles.yaml  # 3일차 장애물 배치 맵
-└── scripts/                  # 원클릭 실행 런처
-    ├── run_day1_sprint.sh    # 1일차 트랙 레이스 실행 스크립트
-    └── run_day3_mission.sh   # 3일차 장애물 미션 실행 스크립트
+├── config/            CycloneDDS, Nav2(RPP), FAST-LIO 설정
+├── docs/              실행 순서(RUN), 콘 회피(CONES), 경기 설계, 규정집
+├── maps/coshow_1119/  경기장 지도 (2D·3D, 경로 편집용 그림)
+├── routes/            기록 경로(lap1·lap2)와 구간 파일(.zones.json, .cones.json)
+├── scripts/           실행 스크립트 (day1.sh, setup_all.sh, day1_align.sh, practice_run.sh …)
+│                      경로·지도 도구 (route_edit, route_sync, cone_splice, map_build …)
+├── src/
+│   ├── core/          go2_bridge (Sport API, 직진 쏠림 보정), Hesai 드라이버
+│   ├── interfaces/    unitree_api, unitree_go 메시지
+│   ├── localization/  FAST-LIO, go2_localization, start_align
+│   ├── mission/track_day1/  주행기 (day1_runner_node, 연습·콘 회피 주행기, 출발 정렬, 경로 계산)
+│   ├── navigation/    ego_planner (이번 대회 주행에는 쓰지 않음)
+│   └── vision/        start_light (신호등·훌라후프 TensorRT 노드, 내부 PC 배포), yolo_test
+└── tests/             가짜 로봇 통합 시험(selftest), 녹화 재생 시험
 ```
 
----
+## 문서
 
-## 4. 모듈별 개발 및 대응 계획
+| 문서 | 내용 |
+|---|---|
+| [docs/RUN.md](docs/RUN.md) | 실제 주행 명령, 주행기 흐름, 키, 문제 해결 |
+| [docs/CONES.md](docs/CONES.md) | 콘 배치가 바뀌었을 때 쓰는 콘 회피 주행기 |
+| [docs/01_1일차_트랙레이스.md](docs/01_1일차_트랙레이스.md) | 1일차 트랙 경기 분석과 설계 |
+| [docs/02_3일차_미션수행.md](docs/02_3일차_미션수행.md) | 3일차 미션 경기 분석과 설계 |
+| [docs/rulebook](docs/rulebook) | 공식 규정집 |
 
-### 4.1 공통 필수: 신호등 녹색 자체 인식 출발 (`start_light`)
-- 심판의 수동 출발 개입 불가 (출발선 녹색 신호 점등 시 로봇 자율 출발).
-- D435i 카메라 영상 기반 YOLOv8 경량 모델 (TensorRT FP16) 적용.
-- 녹색 신호 연속 2회 이상 검출 시 출발 인터록 해제 및 주행 시퀀스 시작.
+## 브랜치
 
-### 4.2 1일차: 900 mm 레인 트랙 고속 주행 (`sprint_follower`)
-- 장애물이 없는 트랙 경기이므로 동적 회피 연산 배제.
-- 사전 생성된 900 mm 레인 중심선 궤적을 기반으로 고속 Pure Pursuit 궤적 추종 수행 ($v_x \ge 0.8\text{ m/s}$).
-- 레인 경계 침범(회당 +10초) 및 인필드 침범(즉시 재시작) 방지를 위해 FAST-LIO 기반 위치 오차 3 cm 이내 유지.
+- `main`: 대회에서 쓰는 코드입니다. 태그 `run-good-1120`이 11-20 잘 되던 상태입니다.
+- `coshow-next`: 기록 단축용 변경을 시험하는 브랜치입니다. main에 합치지 않습니다.
 
-### 4.3 3일차: 장애물 회피 및 5종 미션 수행
-1. **라바콘 회피 (20점)**: 바닥 300×300 mm, 높이 615 mm 정규 규격 콘 회피 주행.
-2. **색상 아치 통과 (20점)**: 통과 높이 800 mm. 당일 추첨 색상 아치를 카메라로 판별 후 해당 통로로 궤적 분기.
-3. **경사 장애물 통과 (20점)**: 조립식 경사로 진입면 등판 및 하강 (자세 안정화).
-4. **타이어 구간 통과 (20점)**: CST 16×3.0 타이어 (외경 450 mm, 폭 76 mm) 구간 통과.
-5. **700 mm 초협소 통로 (20점)**: 로봇 차폭(310 mm) 대비 마진 390 mm. 진입 시 EGO-Planner의 팽창 반경(`inflate_radius`)을 0.12~0.15 m로 동적 축소하여 병목 해소.
-6. **완주 (50점)**: 모든 미션 완료 후 결승선 통과.
+## 라이선스
 
----
-
-## 5. 팀 및 기여도 (Team)
-* **김도현**: 위치추정(FAST-LIO, AMCL), 트랙 궤적 추종기, 700mm 협소통로 플래너 최적화, 통합 런처
-* **팀원**: 온보드 비전(신호등 및 색상 아치 모델), 하드웨어 셋업 및 보행 모드 튜닝
+외부 코드의 라이선스는 [src/EXTERNAL_LICENSES.md](src/EXTERNAL_LICENSES.md)와 각 모듈의 LICENSE 파일을 따릅니다(FAST-LIO GPL-2.0, Hesai ROS Driver 등).
