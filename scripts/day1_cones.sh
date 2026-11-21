@@ -23,13 +23,16 @@ env_ros() {   # the same environment as day1.sh
 case "${1:-}" in
   run)
     env_ros; shift
+    ZZ=0; B=(); for kv in "$@"; do [ "$kv" = zz ] && ZZ=1 || B+=("$kv"); done; set -- "${B[@]}"   # zz = zigzag-edited copy of the route (R_lapN -> Rzz_lapN), the original route untouched
     A=(); for kv in "$@"; do
       case $kv in
         in|out) A+=(-p "lane:=$kv");;
-        route=*) r=${kv#*=}; f=$LOG/routes/$r.csv
+        route=*) r=${kv#*=}; [ "$ZZ" = 1 ] && r=${r/_lap/zz_lap}; f=$LOG/routes/$r.csv
                  [ -f "$f" ] || f=$ROOT/routes/$r.csv
                  [ -f "$f" ] || { echo "★ no route $r in $LOG/routes or $ROOT/routes"; exit 1; }
                  echo "route: $f"; A+=(-p "path_file:=$f");;
+        cv=*) A+=(-p "cones_v:=${kv#*=}");;          # cv = cones_v  (콘 구간 속도, 이번 주행만)
+        zv=*) A+=(-p "zigzag_v:=${kv#*=}");;         # zv = zigzag_v (지그재그 구간 속도, 이번 주행만)
         *=*) A+=(-p "${kv%%=*}:=${kv#*=}");;
         *) echo "★ unknown argument $kv (in|out key=value)"; exit 1;;
       esac

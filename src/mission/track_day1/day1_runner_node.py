@@ -119,6 +119,11 @@ class Day1Runner(Node):
             if self.light == 'none':
                 raise SystemExit('light=none needs debug=true (competition: the start must come from the light)')
         self.look_timeout = float(p('look_timeout', 10.0).value)   # s without the hoop vision, then a random branch
+        # 11-20 next: look_mode=move (default) = no stop at the look point: the hoop vision is switched on look_pre m
+        # before it, the robot keeps walking on the shared stretch and switches route as soon as it has an answer;
+        # still undecided at the fork it stops there (old behaviour from then on). look_mode=stop = the old stop-turn-look
+        self.look_mode = str(p('look_mode', 'move').value).strip().lower()
+        self.look_pre = float(p('look_pre', 1.5).value)   # m; the branches part only 0.25 m after the look point (rec105326)
         self.light_timeout = float(p('light_timeout', 0.0).value)   # s waiting for GREEN, then go anyway; 0 = never (default, 11-20)
         # this run only, the zones file unchanged (11-20 speed tests): zigzag_v / cones_v m/s, 0 = the file's value
         self.zone_v = {'zigzag': float(p('zigzag_v', 0.0).value), 'cones': float(p('cones_v', 0.0).value)}
@@ -476,7 +481,7 @@ class Day1Runner(Node):
             self.get_logger().warn('bench.csv: %s' % e)
 
     def cb_hoop(self, m):
-        if self.look is None or self.look['step'] != 'see' or not self.hoop:
+        if self.look is None or self.look['step'] not in ('see', 'move') or not self.hoop:
             return
         try:
             d = json.loads(m.data).get(self.hoop)
@@ -484,10 +489,16 @@ class Day1Runner(Node):
             return
         if not d:
             return
+        pose = self.look.get('pose')
+        if self.look['step'] == 'move':                 # walking: the pose of this frame, not of a standstill
+            cur = self.pose_at(None)
+            if cur is None:
+                return
+            pose = self.track_pose(cur)
         if 'bearing_deg' in d:
-            self.hoop_seen.append((self.now_s(), self.look['yaw_now'] + math.radians(float(d['bearing_deg']))))
+            self.hoop_seen.append((self.now_s(), pose[2] + math.radians(float(d['bearing_deg'])), pose))
         elif d.get('side') in ('left', 'right'):
-            self.hoop_seen.append((self.now_s(), d['side']))
+            self.hoop_seen.append((self.now_s(), d['side'], pose))
 
     def look_setup(self):
         """The first 'look' zone of the route, if a hoop colour was given: where to stop (station) and the branches."""
@@ -501,10 +512,38 @@ class Day1Runner(Node):
                 ax, ay = z['at']
                 s = self.loop.station(ax, ay)
                 s += math.ceil((self.plan.s_start + 0.5 - s) / self.loop.length) * self.loop.length   # ahead of the start
-                self.look = dict(zone=z, s=s, step='go', t=0.0, yaw_now=0.0)
-                self.get_logger().info('hoop %s: look point (%.2f, %.2f) at %.1f m, face %.0f deg, branches %s'
-                                       % (self.hoop, ax, ay, s - self.plan.s_start, z['yaw_deg'], ', '.join(z['branches'])))
+                self.look = dict(zone=z, s=s, step='go', t=0.0, yaw_now=0.0, fork=s)
+                if self.look_mode == 'move':
+                    self.look['fork'] = s + self.fork_after(s, z)
+                self.get_logger().info('hoop %s: look point (%.2f, %.2f) at %.1f m, face %.0f deg, branches %s%s'
+                                       % (self.hoop, ax, ay, s - self.plan.s_start, z['yaw_deg'], ', '.join(z['branches']),
+                                          ' — look_mode=move: looking from %.1f m before, deciding by the fork %.1f m after'
+                                          % (self.look_pre, self.look['fork'] - s) if self.look_mode == 'move' else ''))
                 return
+
+    def fork_after(self, s, z, sep=0.08, margin=0.3, far=6.0):
+        """m after the look point where the branches part (> sep m apart), less margin; 0 if unknown."""
+        d0 = os.path.dirname(self.path_file)
+        others = []
+        for n in z['branches']:
+            f = os.path.join(d0, n + '.csv')
+            if os.path.abspath(f) == os.path.abspath(self.path_file):
+                continue
+            try:
+                others.append(TP.load_pins(f, self.lane))
+            except Exception as e:
+                self.get_logger().warn('★ fork: cannot load %s (%s)' % (f, e))
+        if not others:
+            return 0.0
+        k = 0.0
+        while k < far:
+            x, y, _ = self.loop.pose_at(s + k)
+            for o in others:
+                ox, oy, _ = o.pose_at(o.station(x, y))
+                if math.hypot(ox - x, oy - y) > sep:
+                    return max(0.0, k - margin)
+            k += 0.05
+        return max(0.0, far - margin)
 
     def look_decide(self):
         """Branch whose hoop lies in the seen direction (or on the seen side); None if nothing yet."""
@@ -514,18 +553,38 @@ class Day1Runner(Node):
             return names[min(self.hoop_pick, len(names) - 1)], 'key'
         if len(self.hoop_seen) < 3:
             return None, ''
-        x, y, _ = self.look['pose']
-        bear = {n: math.atan2(p[1] - y, p[0] - x) for n, p in z['branches'].items()}
-        seen = [v for _, v in self.hoop_seen[-5:]]
-        if all(isinstance(v, float) for v in seen):
-            b = math.atan2(np.mean(np.sin(seen)), np.mean(np.cos(seen)))
-            n = min(bear, key=lambda k: abs(TP.wrap(bear[k] - b)))
-            return n, 'bearing %.0f deg (hoops at %s)' % (math.degrees(b), ', '.join('%s %.0f' % (k, math.degrees(v)) for k, v in bear.items()))
-        sides = [v for v in seen if isinstance(v, str)]
-        side = max(set(sides), key=sides.count)
-        left = max(bear, key=lambda k: TP.wrap(bear[k] - self.look['yaw_now']))     # hoop more to the left
-        right = min(bear, key=lambda k: TP.wrap(bear[k] - self.look['yaw_now']))
-        return (left if side == 'left' else right), 'side %s' % side
+        seen = self.hoop_seen[-5:]
+        if self.look['step'] != 'move':                 # standing still: the original rule, one pose for all frames
+            x, y, _ = self.look['pose']
+            bear = {n: math.atan2(p[1] - y, p[0] - x) for n, p in z['branches'].items()}
+            vals = [v for _, v, _ in seen]
+            if all(isinstance(v, float) for v in vals):
+                b = math.atan2(np.mean(np.sin(vals)), np.mean(np.cos(vals)))
+                n = min(bear, key=lambda k: abs(TP.wrap(bear[k] - b)))
+                return n, 'bearing %.0f deg (hoops at %s)' % (math.degrees(b), ', '.join('%s %.0f' % (k, math.degrees(v)) for k, v in bear.items()))
+            sides = [v for v in vals if isinstance(v, str)]
+            side = max(set(sides), key=sides.count)
+            left = max(bear, key=lambda k: TP.wrap(bear[k] - self.look['yaw_now']))     # hoop more to the left
+            right = min(bear, key=lambda k: TP.wrap(bear[k] - self.look['yaw_now']))
+            return (left if side == 'left' else right), 'side %s' % side
+        # walking: each frame judged from its own pose, then a vote (3/3, 4/4, or 4 of the last 5)
+        votes, errs = [], []
+        for _, v, (x, y, yaw) in seen:
+            bear = {n: math.atan2(p[1] - y, p[0] - x) for n, p in z['branches'].items()}
+            if isinstance(v, float):
+                n = min(bear, key=lambda k: abs(TP.wrap(bear[k] - v)))
+                errs.append(math.degrees(abs(TP.wrap(bear[n] - v))))
+            else:
+                pick = max if v == 'left' else min
+                n = pick(bear, key=lambda k: TP.wrap(bear[k] - yaw))
+            votes.append(n)
+        n = max(set(votes), key=votes.count)
+        if votes.count(n) < min(len(votes), 4) and len(votes) < 5:
+            return None, ''
+        if votes.count(n) < 4 and len(votes) >= 5:
+            return None, ''
+        return n, 'walking, %d/%d frames%s' % (votes.count(n), len(votes),
+                                               ', off %.0f deg' % np.mean(errs) if errs else '')
 
     def look_switch(self, name, why, s_r):
         """Continue on route `name` (same folder): shared up to here, so only the rest of the lap changes."""
@@ -553,9 +612,13 @@ class Day1Runner(Node):
             sn += round((s0 + done - sn) / loop.length) * loop.length
             self.prog = TP.Progress(self.lane, sn, loop=loop)
             self.get_logger().info('route now %s: %.2f m/lap, %.1f m done, %.1f m to go' % (name, loop.length, sn - s0, self.plan.s_end - sn))
+        walking = self.look['step'] == 'move'
         self.look['step'] = 'done'
         self.look_done = True
         self.last_goal_t = 0.0
+        if walking:
+            self.state = 'RUN'            # never stopped: no StopMove, the gait is still on — just walk on
+            return
         if self.gait:
             # 11-20: standing at the look point the motor bridge sent StopMove, which may reset most sport settings —
             # put the gait (ClassicWalk) back before walking on: BalanceStand -> 0.5 s -> gait -> answer (or 1.5 s)
@@ -833,6 +896,32 @@ class Day1Runner(Node):
                     q = self.last_rot
                     self.bench['rp'].append((math.atan2(2 * (q.w * q.x + q.y * q.z), 1 - 2 * (q.x * q.x + q.y * q.y)),
                                              math.asin(max(-1.0, min(1.0, 2 * (q.w * q.y - q.z * q.x))))))
+                if (self.state == 'RUN' and self.look is not None and self.look_mode == 'move'
+                        and self.look['step'] == 'go' and self.look['s'] - s_r < self.look_pre):
+                    self.look.update(step='move', t=t)              # walk on, vision on
+                    self.hoop_seen = []
+                    self.pub_hoop.publish(Bool(data=True))
+                    self.cam_pub_t = t
+                    self.get_logger().info('looking for the %s hoop while walking (%.1f m, fork in %.1f m) — 1 / 2 picks %s'
+                                           % (self.hoop, s_r - self.plan.s_start, self.look['fork'] - s_r,
+                                              ' / '.join(self.look['zone']['branches'])))
+                if self.state == 'RUN' and self.look is not None and self.look['step'] == 'move':
+                    if t - self.cam_pub_t > 1.0:
+                        self.pub_hoop.publish(Bool(data=True))
+                        self.cam_pub_t = t
+                    name, why = self.look_decide()
+                    if name is not None:
+                        self.look_switch(name, '%s, %.1f m before the fork' % (why, self.look['fork'] - s_r), s_r)
+                    elif self.look['fork'] - s_r < 0.15:          # no answer by the fork: stop there, old way
+                        if self.goal_handle is not None:
+                            self.goal_handle.cancel_goal_async()
+                            self.goal_handle = None
+                        self.pub_cmd.publish(Twist())
+                        self.state = 'LOOK'
+                        self.look.update(step='turn', t=t)
+                        self.get_logger().warn('★ no %s hoop answer while walking (%.1f s) — stopping at the fork, turning to %.0f deg'
+                                               % (self.hoop, t - self.look['t'], self.look['zone']['yaw_deg']))
+                        return
                 if self.state == 'RUN' and self.look is not None and self.look['step'] == 'go' and self.look['s'] - s_r < 0.15:
                     if self.goal_handle is not None:
                         self.goal_handle.cancel_goal_async()
@@ -858,8 +947,8 @@ class Day1Runner(Node):
             # only 6 m ahead: the whole lap + extra ends where the robot is 1.2 m after the start, and RPP calls a
             # goal 'reached' as soon as the robot is within 0.1 m of the path's last pose (stalled the run, 11-19)
             s_to = s_r + 6.0
-            if self.look is not None and self.look['step'] == 'go':
-                s_to = min(s_to, self.look['s'])                    # stop at the look point
+            if self.look is not None and self.look['step'] in ('go', 'move'):
+                s_to = min(s_to, self.look['fork'])  # stop at the look point (look_mode=stop) / at the fork if still undecided (move)
             pts = TP.apply(self.T_ot, self.plan.points(s_r - 0.3, s_to))
         msg = self.make_path(pts)
         self.pub_path.publish(msg)
@@ -980,7 +1069,7 @@ def key_loop(node):
                 node.stop('key')
             elif ch in ('1', '2', 'g', 'G') and not node.debug:
                 node.get_logger().warn('★ key %s ignored — debug=true only (competition: no hand picks)' % ch)
-            elif ch in ('1', '2') and node.state == 'LOOK':
+            elif ch in ('1', '2') and (node.state == 'LOOK' or (node.look is not None and node.look.get('step') == 'move')):
                 node.hoop_pick = int(ch) - 1
                 node.get_logger().warn('★ key %s — branch picked by hand' % ch)
             elif ch in ('g', 'G') and node.state == 'WAIT':
