@@ -22,7 +22,21 @@ fi
 CORES=${CORES:-6,7}; mkdir -p $D/logs $D/results
 RUN=(nice -n 19 taskset -c $CORES)
 node_pid(){ pgrep -f "[t]raffic_light_trt_node.py"; }
+hoop_pid(){ pgrep -f "[h]oop_trt_node.py"; }
 cam_pid(){ pgrep -f "[r]ealsense2_camera_node"; }
+# hula hoop: own 2-class model (default) or the team's 6-class one: HOOP_E16=<engine> HOOP_CLS="2 3" (rh yh class ids)
+HOOP_ONNX=$D/hoop_384x640.onnx; HOOP_E16=${HOOP_E16:-$D/hoop_384x640_fp16.engine}
+HOOP_CLS=${HOOP_CLS:-$(cat $D/hoop_classes.txt 2>/dev/null || echo 0 1)}   # written by scripts/hoop_model.py on the NUC
+cam_start(){   # color + depth 848x480x30, the same arguments as the recording
+  if [ -z "$(cam_pid)" ]; then
+    P=848x480x30
+    setsid nohup ros2 launch realsense2_camera rs_launch.py enable_color:=true enable_depth:=true enable_infra1:=false \
+      enable_infra2:=false enable_gyro:=false enable_accel:=false rgb_camera.profile:=$P rgb_camera.color_profile:=$P \
+      depth_module.profile:=$P depth_module.depth_profile:=$P \
+      > $D/logs/camera_$(date +%H%M%S).log 2>&1 < /dev/null &
+    echo "카메라 켬(컬러+뎁스 $P)"; sleep 6
+  else echo "카메라 이미 켜져 있음(그대로 씀): pid $(cam_pid | tr '\n' ' ')"; fi
+}
 case "${1:-status}" in
   build)
     python3 -c "import tensorrt as t, numpy, cv2; print('TensorRT', t.__version__, 'numpy', numpy.__version__, 'cv2', cv2.__version__)" || exit 1
@@ -59,6 +73,19 @@ case "${1:-status}" in
     setsid nohup "${RUN[@]}" python3 $D/traffic_light_trt_node.py --ros-args -p engine_path:=$EN > $L 2>&1 < /dev/null &
     sleep 5; tail -3 $L; [ -n "$(node_pid)" ] && echo "■ 신호등 노드 켬 (로그 $L)" || { echo "★ 노드가 안 떴다 — $L"; exit 1; };;
   stop)        pkill -INT -f "[t]raffic_light_trt_node.py" && echo "신호등 노드 끔" || echo "신호등 노드 없음";;
+  hoop-build)  # hula-hoop model (2 classes rh/yh, 11-19 insu_label) -> FP16 engine. Robot lying down
+    [ -f $HOOP_ONNX ] || { echo "★ $HOOP_ONNX 없음 — NUC 에서 day1.sh hoop push"; exit 1; }
+    python3 -c "import tensorrt" || exit 1
+    "${RUN[@]}" python3 $D/trt_build.py $HOOP_ONNX $HOOP_E16 --mode fp16 || exit 1;;
+  hoop-start)  # camera (if not running) + hoop node; it reads the camera only while /mission/hoop_active is True
+    [ -f $HOOP_E16 ] || { echo "★ $HOOP_E16 없음 — hoop-build 먼저"; exit 1; }
+    cam_start
+    if [ -n "$(hoop_pid)" ]; then echo "훌라후프 노드 이미 켜져 있음: pid $(hoop_pid)"; exit 0; fi
+    L=$D/logs/hoop_$(date +%H%M%S).log
+    set -- $HOOP_CLS
+    setsid nohup "${RUN[@]}" python3 $D/hoop_trt_node.py --ros-args -p engine:=$HOOP_E16 -p red_cls:=$1 -p yellow_cls:=$2 > $L 2>&1 < /dev/null &
+    sleep 5; tail -2 $L; [ -n "$(hoop_pid)" ] && echo "■ 훌라후프 노드 켬 (로그 $L)" || { echo "★ 노드가 안 떴다 — $L"; exit 1; };;
+  hoop-stop)   pkill -INT -f "[h]oop_trt_node.py" && echo "훌라후프 노드 끔" || echo "훌라후프 노드 없음";;
   stop-camera) pkill -INT -f "[r]s_launch.py"; pkill -INT -f "[r]ealsense2_camera_node" && echo "카메라 끔" || echo "카메라 없음";;
   bench)
     [ -f $EN ] || { echo "★ $EN 없음"; exit 1; }
@@ -68,8 +95,8 @@ case "${1:-status}" in
       -r /mission/traffic_light_debug:=/mission/traffic_light_debug_bench 2>&1 | grep -vE "^\s*$" | tail -8;;
   status)
     echo "모델: $TL_MODEL  쓸 엔진: $(basename $EN)  있는 엔진: $(ls -la $E16 $E8 2>/dev/null | awk '{print $NF, $5}' | tr '\n' ' ')"
-    echo "카메라: $(cam_pid | tr '\n' ' ')  신호등 노드: $(node_pid | tr '\n' ' ')"
+    echo "카메라: $(cam_pid | tr '\n' ' ')  신호등 노드: $(node_pid | tr '\n' ' ')  훌라후프 노드: $(hoop_pid | tr '\n' ' ')  훌라후프 엔진: $(ls $HOOP_E16 2>/dev/null || echo 없음)"
     L=$(ls -t $D/logs/tl_*.log 2>/dev/null | head -1); [ -n "$L" ] && { echo "--- $L"; tail -4 $L; }
     echo "온도: $(cat /sys/devices/virtual/thermal/thermal_zone*/temp 2>/dev/null | awk '{printf "%d ", $1/1000}')°C  부하: $(cut -d' ' -f1-3 /proc/loadavg)";;
-  *) echo "사용: jetson_vision.sh build|eval|start|stop|stop-camera|status|bench"; exit 1;;
+  *) echo "사용: jetson_vision.sh build|eval|start|stop|stop-camera|status|bench|hoop-build|hoop-start|hoop-stop"; exit 1;;
 esac

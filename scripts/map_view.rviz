@@ -1,0 +1,108 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Help Height: 0
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid (1 m)
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 12
+      Color: 160; 160; 164
+      Alpha: 0.3
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Class: rviz_default_plugins/Map
+      Name: 2D map (5 cm)
+      Enabled: true
+      Topic:
+        Value: /map
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Alpha: 0.35
+      Color Scheme: map
+      Draw Behind: true
+      Value: true
+    - Class: rviz_default_plugins/PointCloud2
+      Name: 3D map (color = height above floor)
+      Enabled: true
+      Topic:
+        Value: /map_cloud
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Style: Points
+      Size (Pixels): 2
+      Size (m): 0.02
+      Color Transformer: Intensity
+      Channel Name: intensity
+      Use rainbow: true
+      Invert Rainbow: false
+      Autocompute Intensity Bounds: false
+      Min Intensity: 0
+      Max Intensity: 0.8
+      Alpha: 1
+      Decay Time: 0
+      Position Transformer: XYZ
+      Queue Size: 1
+      Selectable: false
+      Value: true
+    - Class: rviz_default_plugins/Path
+      Name: mapping drive
+      Enabled: true
+      Topic:
+        Value: /map_traj
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Color: 255; 0; 255
+      Line Style: Lines
+      Alpha: 1
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: track lines + wall (rulebook)
+      Enabled: true
+      Topic:
+        Value: /map_track_lines
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Namespaces:
+        track: true
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 30; 30; 34
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 11
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Pitch: 0.75
+      Yaw: -1.5708
+      Name: Current View
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz)
+    Saved: ~
+Window Geometry:
+  Width: 1500
+  Height: 950

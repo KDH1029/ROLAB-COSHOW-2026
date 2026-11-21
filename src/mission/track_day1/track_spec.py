@@ -36,3 +36,30 @@ def boundary_offsets(lane):
 def min_avg_speed(lane, extra=1.0, limit_s=60.0, start_delay=1.5):
     """Average speed needed to finish one lap (+ extra to get the rear feet over the line) in limit_s."""
     return (LAP_LEN[lane] + extra) / (limit_s - start_delay)
+
+
+# ---------------------------------------------------------------------------------------------- walls
+# Not in the rulebook as a wall: the 0.6 m wall stands on the edge of the 9000 x 7000 floor plate (rulebook 5.1,
+# margin 495 mm around the 8010 x 6010 track), no gaps. Measured 11-18 from the XT16 (bags 133542/134210):
+# 9.00 x 7.01 m between the inner faces. (By eye it looked like 0.30 m from the outline; the lidar says 0.5 m.)
+# Track frame: origin = track centre, x = long axis (straights parallel to x), z up; counter-clockwise travel.
+WALL_GAP = 0.495
+WALL_H = 0.60
+WALL_LX = 2 * (STRAIGHT / 2 + R_OUTER) + 2 * WALL_GAP     # 9.00 m, inner face to inner face
+WALL_LY = 2 * R_OUTER + 2 * WALL_GAP                       # 7.00 m
+
+
+def lane_frame(lane, x, y):
+    """Track-frame point -> (lateral offset from the lane centre, + = left of travel; travel heading rad).
+
+    Counter-clockwise travel. The lane centre is a stadium of radius R_CENTER[lane] around (+-STRAIGHT/2, 0).
+    """
+    r = R_CENTER[lane]
+    cx = max(-STRAIGHT / 2, min(STRAIGHT / 2, x))
+    dx, dy = x - cx, y
+    d = math.hypot(dx, dy)
+    if d < 1e-9:
+        return r, 0.0
+    # outward normal (dx, dy)/d; CCW tangent = normal rotated +90 deg; left of travel = inward
+    heading = math.atan2(dx / d, -dy / d)
+    return r - d, heading

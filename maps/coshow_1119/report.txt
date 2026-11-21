@@ -1,0 +1,8 @@
+source gosu_20261119_105010_11191050
+scans 3373, voxels 1786681 (2 cm, seen >= 2 times)
+floor tilt corrected 0.64 deg, mapping start 0.354 m above the floor
+wall fit: spacing 7.007 x 9.019 m (arena 9.00 x 7.00), rms 0.023 m, walls 4; mapping start at track (-0.52, -2.23) yaw 0.6 deg
+trajectory 51.5 m, 169 s, start-end 0.11 m, height 0.19..0.47 m
+floor: 315 cells, local floor heights -0.037..0.093 m, floor thickness (p5..p95 around it) 0.120 m
+clean: kept 469450 of 1783782 voxels (inside the wall, floor..1.2 m, 3-25 cm layer seen >= 6x, lone specks dropped)
+grid 200 x 160 at 0.05 m: occupied 2127 cells (points 0.05..0.60 m above the local floor standing >= 0.10 m tall in the cell), free 20251

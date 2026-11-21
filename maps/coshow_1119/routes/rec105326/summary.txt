@@ -1,0 +1,5 @@
+source gosu_20261119_105326_11191053, map coshow_1119
+wall poses 636 of 704 frames; track<-odom spread over the drive: median 2.5 cm / max 744.6 cm, yaw median 0.86 / max 90.02 deg
+twin by the map: drive on occupied cells 25 vs other twin 188
+drive 49.0 m in 176.0 s (moving avg 0.29 m/s, max 0.54), start (-0.49, -2.33) yaw 5, end (-0.19, -2.52), start-end 0.36 m
+stops >= 1 s: 0-2s at (-0.49,-2.33), 40-42s at (1.94,1.72), 67-69s at (1.00,1.33)
