@@ -59,8 +59,8 @@ ROLAB-COSHOW-2026/
 | [docs/RUN.md](docs/RUN.md) | 빌드, 실행 명령과 인자 전체, 주행기 흐름, 키, 문제 해결 |
 | [docs/STRUCTURE.md](docs/STRUCTURE.md) | 프로세스·토픽·좌표계, 패키지와 파일, 주행기 상태, 경로·구간·지도 파일 형식 |
 | [docs/CONES.md](docs/CONES.md) | 콘 배치가 바뀌었을 때 쓰는 콘 회피 주행기 |
-| [docs/01_1일차_트랙레이스.md](docs/01_1일차_트랙레이스.md) | 1일차 트랙 경기 분석과 설계 |
-| [docs/02_3일차_미션수행.md](docs/02_3일차_미션수행.md) | 3일차 미션 경기 분석과 설계 |
+| [docs/01_1일차_트랙레이스.md](docs/01_1일차_트랙레이스.md) | 1일차 트랙 경기 분석과 설계 (11-17 대회 전 설계안) |
+| [docs/02_3일차_미션수행.md](docs/02_3일차_미션수행.md) | 3일차 미션 경기 분석과 설계 (11-17 대회 전 설계안, EGO-Planner 기준) |
 | [docs/rulebook](docs/rulebook) | 공식 규정집 |
 
 ## 브랜치

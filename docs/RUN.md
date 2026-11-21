@@ -14,7 +14,6 @@ colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
 
 - 빌드하는 것은 C++ 패키지(go2_bridge, FAST-LIO, Hesai 드라이버, 메시지)다. 주행기 같은 파이썬 노드는 스크립트가 `src/`에서 바로 실행하므로 빌드할 필요가 없다.
-
 - 필요한 것: Ubuntu 24.04, ROS 2 Jazzy, Nav2(`nav2_controller`, `nav2_regulated_pure_pursuit_controller`, `nav2_lifecycle_manager`), CycloneDDS(`rmw_cyclonedds_cpp`), Unitree ROS 2 메시지(`~/unitree_ros2`).
 - 파이썬: numpy, scipy, OpenCV, `rosbag2_py`(녹화 도구).
 - 커널 수신 버퍼를 늘린다. 기본값이면 XT16 점구름이 30% 가까이 버려진다.
@@ -32,7 +31,7 @@ scripts/day1.sh hoop build                               # 훌라후프 TensorRT
 
 ### 별칭
 
-`~/.bash_aliases`에 `d`로 시작하는 별칭이 있다. 목록은 `dhelp`로 본다. 별칭 뒤에 인자를 더 붙일 수 있다(예: `dred debug=true`). 아래 표는 별칭과 실제 명령을 같이 적었다. 실제 명령은 저장소 루트 기준이다.
+`~/.bash_aliases`에 `d`로 시작하는 별칭이 있다. 새 PC라면 [부록](#부록-별칭-정의)의 정의를 붙여 넣는다. 목록은 `dhelp`로 본다. 별칭 뒤에 인자를 더 붙일 수 있다(예: `dred debug=true`). 아래 표는 별칭과 실제 명령을 같이 적었다. 실제 명령은 저장소 루트 기준이다.
 
 ## 1. 준비 (전원 켤 때 한 번)
 
@@ -72,6 +71,8 @@ scripts/day1.sh hoop build                               # 훌라후프 TensorRT
 | `din` | `scripts/day1.sh run route=rec105326_lap1 hoop=in v=0.8` | 안쪽 갈래로 정해 두고 (비전 안 봄) |
 | `dout` | `scripts/day1.sh run route=rec105326_lap1 hoop=out v=0.8` | 바깥쪽 갈래로 정해 두고 |
 | `dtry N` | `scripts/try_route.sh N` | 콘 구간 변형 경로 1·2·3 (기본 `hoop=in v=0.8`) |
+| `dcones` | `scripts/day1_cones.sh run route=rec105326_lap1 v=0.8` | 콘이 옮겨졌을 때 예비. 콘 구간에서 옮겨진 콘을 비켜 감. 색은 `dcones hoop=red`처럼 붙임 ([CONES.md](CONES.md)) |
+| – | `scripts/day1.sh run in v=0.8` / `run out v=0.8` | 1일차 트랙 경기 (끝남). 경로 파일 없이 규정 트랙 레인 중심선을 따라감. 출발 정렬 안 씀 |
 
 출발 정렬이 필요한 이유: 출발 표시는 기록한 경로 출발점에서 왼쪽으로 약 0.2 m, 방향은 14° 틀어져 있다. 그대로 출발하면 1 m 앞 첫 콘에 닿는다. 정렬은 벽으로 위치를 찾고, 경로 방향으로 제자리에서 돈 뒤 옆걸음으로 경로 위에 올라선다. 먼저 odom TF와 모터 브리지가 5초 안에 보이는지 확인하므로, `up` 전에 실행하면 바로 알려 준다.
 
@@ -88,6 +89,7 @@ scripts/day1.sh hoop build                               # 훌라후프 TensorRT
 
 | 인자 | 기본 | 뜻 |
 |---|---|---|
+| `in` / `out` | in | 1일차 트랙 레인 (in = 2레인 안쪽, out = 1레인 바깥쪽). `route=`를 주면 경로 파일이 길을 정하므로 쓰지 않음 |
 | `route=` | – | 경로 이름. `logs/day1/routes/` 작업본을 먼저 찾고, 없으면 `routes/` |
 | `v=` | 0.5 (별칭 0.8) | 최고 속도 (m/s). 브리지 상한 0.8을 넘으면 0.8로 낮춤. ClassicWalk 실제 속도는 0.65 안팎 |
 | `hoop=` | – | `red` `yellow` = 아치 앞에서 비전으로 고름 / `in` `out` = 처음부터 그 갈래 |
@@ -168,13 +170,40 @@ scripts/day1.sh hoop build                               # 훌라후프 TensorRT
 | `droutes` | `scripts/day1.sh routes` | 경로 목록 (작업본 → 저장소) |
 | `dsplice` | `scripts/cone_splice.sh <녹화 폴더> [pass=N]` | 콘만 옮겨졌을 때. 짧은 리모컨 녹화로 경로와 지도의 콘 구간만 바꿔 끼움 (격리 재생, 5~10분) |
 | `dpasses` | `scripts/passes_view.sh` | 콘 녹화의 통과별 경로를 편집기에 색깔별로 겹쳐 봄 (`r` 숨기기, `s` 저장) |
-| – | `scripts/day1.sh teach in name=R` | 리모컨으로 한 바퀴 몰아 새 경로 기록 (`up` 뒤, 모터 명령 없음) |
-| – | `scripts/route_look.py <lap1.csv> <lap2.csv> at=x,y` | 훌라후프 보는 자리를 구간 파일에 씀 |
 | – | `scripts/view_map.sh maps/coshow_1119` | 3D 지도 보기 |
 
 콘 배치가 바뀌었는데 다시 녹화할 시간이 없으면, `day1.sh run` 대신 `scripts/day1_cones.sh run …`(별칭 `dcones`)을 쓴다. 인자는 같고, 콘 구간에서 옮겨진 콘을 `/scan`으로 비켜 간다. 자세한 내용은 [CONES.md](CONES.md).
 
-## 6. 기록 보기
+## 6. 새 코스에서 경로 만들기
+
+콘 배치만 바뀌었으면 위의 `dsplice`로 충분하다. 경기장이나 코스가 새로 바뀌었을 때의 순서다.
+
+1. **경로 기록**: `dup` 뒤 로봇을 출발 표시에 세우고 실행한다. 리모컨으로 코스를 한 바퀴 몰면, 출발선을 지날 때 저장된다(Enter = 바로 저장). 모터 명령은 나가지 않는다. 결과는 `logs/day1/routes/<이름>.csv`다. 갈래가 둘이면 두 번 기록한다.
+   ```bash
+   scripts/day1.sh teach in name=<이름>_lap1
+   ```
+2. **지도** (같은 주행을 `/lidar_points`, `/lowstate`와 함께 녹화해 두었을 때): 녹화를 실제 속도로 재생해 FAST-LIO 지도를 만들고, 바닥을 수평으로 맞춘 뒤 벽에 맞춰 트랙 좌표로 둔다. 결과는 `maps/<이름>/`다. 느리게 재생하면 IMU 시각이 깨진다.
+   ```bash
+   scripts/map_from_bag.sh <녹화 폴더> <이름>
+   ```
+3. **두 갈래 맞추기**: 같이 가는 구간을 한 줄로 만든다.
+   ```bash
+   python3 scripts/route_merge.py logs/day1/routes/<이름>_lap1.csv logs/day1/routes/<이름>_lap2.csv map=maps/<이름>
+   ```
+4. **지그재그 구간**: 상자 안의 경로를 지도의 통로 가운데 선으로 바꾸고 구간 파일(`.zones.json`)을 쓴다.
+   ```bash
+   python3 scripts/route_corridor.py logs/day1/routes/<이름>_lap1.csv logs/day1/routes/<이름>_lap2.csv zone=x0,y0,x1,y1 name=zigzag
+   ```
+5. **훌라후프 보는 자리**: 두 갈래가 아직 같은 곳에 찍는다. 갈래별 훌라후프 좌표도 같이 기록된다.
+   ```bash
+   python3 scripts/route_look.py logs/day1/routes/<이름>_lap1.csv logs/day1/routes/<이름>_lap2.csv at=x,y
+   ```
+6. **라바콘 구간**: `.zones.json`에 `cones` 상자(속도·앞보기)를 넣는다. 콘 회피 주행기를 쓸 거면 `day1_cones.sh zone`으로 `.cones.json`도 만든다.
+7. **확인**: `day1.sh edit`로 핀을 다듬고, `dself`로 가짜 로봇 점검을 한 뒤 실기로 넘어간다. 저장소에 남기려면 `logs/day1/routes/`의 파일을 `routes/`로 복사해 커밋한다(`dself`는 `routes/`의 파일로 시험한다).
+
+녹화에서 바로 경로를 뽑는 `scripts/route_from_bag.py`(녹화 + FAST-LIO 재생 CSV + 지도 → 핀)도 있다. FAST-LIO 재생 CSV는 `tests/fastlio_replay.sh`로 만든다.
+
+## 7. 기록 보기
 
 | 별칭 | 명령 | 하는 일 |
 |---|---|---|
@@ -183,7 +212,7 @@ scripts/day1.sh hoop build                               # 훌라후프 TensorRT
 | `dlast` | `scripts/day1_cones.sh last` | 콘 회피 마지막 기록 그림 |
 | `dself` | `scripts/day1.sh selftest` | 가짜 로봇으로 전체 점검 (약 3분, 격리 도메인) |
 
-## 7. 끝낼 때
+## 8. 끝낼 때
 
 | 별칭 | 명령 | 하는 일 |
 |---|---|---|
@@ -191,7 +220,7 @@ scripts/day1.sh hoop build                               # 훌라후프 TensorRT
 | `dkill` | `scripts/kill_all.sh` | NUC에서 주행 관련 프로세스를 강제로 모두 끔 (도메인 0만, 녹화는 그대로). 로봇에 StopMove 먼저 보냄 |
 | `dkill robot` | `scripts/kill_all.sh robot` | 위 + 내부 PC 신호등·훌라후프·yolo 노드와 카메라 |
 
-## 8. 문제가 생기면
+## 9. 문제가 생기면
 
 | 증상 | 확인 |
 |---|---|
@@ -204,3 +233,62 @@ scripts/day1.sh hoop build                               # 훌라후프 TensorRT
 | 훌라후프에서 늘 무작위로 고름 | `dhoop`으로 노드 확인, `dwhich`로 실제 판단 확인 |
 | `robot is … from where the route was taught to start` | 출발 표시가 다름 |
 | 터미널이 입력을 안 보여 줌 | `reset` |
+
+## 10. coshow-next 브랜치 (기록 단축 시험)
+
+`coshow-next`는 main을 건드리지 않고 기록 단축을 시험하는 브랜치다. 실기 검증 전이다. 따로 받은 폴더(예: `~/ws/ROLAB-COSHOW-next`)에서 `e`로 시작하는 별칭으로 돌리며, 명령과 인자는 main과 같고 아래만 다르다.
+
+| 항목 | main | coshow-next |
+|---|---|---|
+| 구간 기본 속도 | 콘 0.6, 지그재그 0.4 | 콘 0.65, 지그재그 0.45 |
+| 훌라후프 | 보는 자리에서 서서 돌고 봄 | `look_mode=move`(기본): 보는 자리 `look_pre`(1.5 m) 전부터 걸으면서 보고, 4/5 프레임이 같은 갈래면 바로 바꿈. 갈래가 갈리는 곳까지 답이 없으면 거기서 서서 예전 방식. `look_mode=stop` = main과 같음 |
+| 줄임 인자 | – | `cv=` = `cones_v=`, `zv=` = `zigzag_v=` |
+| 지그재그 고친 경로 | – | `zz`: `<경로>_lapN` 대신 사본 `<경로>zz_lapN`으로 주행 (별칭 `ezred`, `ezin`, `ezhere`, `ezeditin` …). 사본 `rec105326zz_lap*`은 그 폴더의 작업본(`logs/day1/routes/`)에만 있고 git에는 없다 |
+
+`dsetup`과 `esetup`은 같은 로봇 노드를 띄운다. 한쪽만 켜 두고, 바꿀 때는 먼저 `dkill`을 한다.
+
+## 부록: 별칭 정의
+
+`~/.bashrc` 또는 `~/.bash_aliases`에 붙여 넣는다. `R`은 저장소 위치다.
+
+```bash
+R=~/ws/ROLAB-COSHOW-2026
+alias dsetup="$R/scripts/setup_all.sh"
+alias dxt="$R/scripts/day1.sh xt16"
+alias dlight="$R/scripts/day1.sh light"
+alias dup="$R/scripts/day1.sh up"
+alias ddown="$R/scripts/day1.sh down"
+alias dkill="$R/scripts/kill_all.sh"
+alias dstat="$R/scripts/day1.sh status"
+alias dlc="$R/scripts/day1.sh lightcheck"
+alias dhoop="$R/scripts/day1.sh hoop status"
+alias dhoopon="$R/scripts/day1.sh hoop start"
+alias dhoopup="$R/scripts/hoop_update.sh"
+alias dwhich="$R/scripts/hoop_which.sh"
+alias dhc="$R/scripts/hoop_check.sh"
+alias dhce="$R/scripts/hoop_check.sh engine"
+alias dyolo="$R/scripts/yolo_view.sh"
+alias dkeep="$R/scripts/track_keep.sh"
+alias dhere="$R/scripts/practice_run.sh"
+alias dlook="$R/scripts/look_test.sh"
+alias dlookhere="$R/scripts/look_test.sh here"
+alias dalign="$R/scripts/day1_align.sh route=rec105326_lap1"
+alias dred="$R/scripts/day1.sh run route=rec105326_lap1 hoop=red v=0.8"
+alias dyellow="$R/scripts/day1.sh run route=rec105326_lap1 hoop=yellow v=0.8"
+alias din="$R/scripts/day1.sh run route=rec105326_lap1 hoop=in v=0.8"
+alias dout="$R/scripts/day1.sh run route=rec105326_lap1 hoop=out v=0.8"
+alias dtry="$R/scripts/try_route.sh"
+alias dcones="$R/scripts/day1_cones.sh run route=rec105326_lap1 v=0.8"
+alias dlast="$R/scripts/day1_cones.sh last"
+alias dsplice="$R/scripts/cone_splice.sh"
+alias dpasses="$R/scripts/passes_view.sh"
+alias deditin="$R/scripts/day1.sh edit rec105326_lap1"
+alias deditout="$R/scripts/day1.sh edit rec105326_lap2"
+alias dsyncin="$R/scripts/day1.sh sync rec105326_lap1 rec105326_lap2"
+alias dsyncout="$R/scripts/day1.sh sync rec105326_lap2 rec105326_lap1"
+alias droutes="$R/scripts/day1.sh routes"
+alias dzones="python3 $R/scripts/zone_times.py"
+alias dbench="$R/scripts/day1.sh bench"
+alias dself="$R/scripts/day1.sh selftest"
+alias dhelp='alias | grep "^alias d"'
+```

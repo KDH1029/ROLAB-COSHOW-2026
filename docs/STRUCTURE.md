@@ -47,7 +47,7 @@
 |---|---|---|
 | `hesai_ros_driver_node` | `src/core/hesai_ros_driver` | XT16 점구름 `/lidar_points` 20 Hz (`day1.sh xt16`) |
 | `imu_bridge_node` | `src/core/go2_bridge` | `/lowstate` 500 Hz → `/imu/body` |
-| `cloud_bridge_node` | `src/core/go2_bridge` | `/lidar_points` → 로봇 몸체 기준 `/velodyne_points`, 세로 스캔 `/scan` (360칸, 20 Hz) |
+| `cloud_bridge_node` | `src/core/go2_bridge` | `/lidar_points` → 시각을 맞춘 `/velodyne_points`(FAST-LIO 입력), 2D 스캔 `/scan`(중력 기준, 360칸. 완만한 경사는 바닥으로, 급한 단차만 장애물로) |
 | `fastlio_mapping` | `src/localization/fast_lio` | 라이다 + IMU 오도메트리 `/Odometry`. 설정 `config/fastlio/fastlio_xt16_odometry.yaml` |
 | `odom_tf_node` | `src/core/go2_bridge` | `/Odometry` → TF odom→base_link |
 | `cmd_vel_to_sport_node` | `src/core/go2_bridge` | `/cmd_vel` → Sport API. 속도 상한·하한, 직진 쏠림 보정. 주행기가 켜고 끔(lifecycle) |
@@ -59,11 +59,11 @@
 | 프로세스 | 파일 | 하는 일 |
 |---|---|---|
 | `realsense2_camera` | (설치본) | D435i 컬러 영상 |
-| `traffic_light_trt_node.py` | `src/vision/start_light` | 신호등 YOLO (TensorRT). `/mission/camera_active`가 True일 때만 판단 |
-| `hoop_trt_node.py` | `src/vision/start_light` | 훌라후프 YOLO (TensorRT FP16, 모델 tl6_1119b). `/mission/hoop_active`가 True일 때만 판단 |
+| `traffic_light_trt_node.py` | `src/vision/start_light` | 신호등 YOLO. 모델 `tl_cone_1104`, TensorRT FP16 (INT8은 초록 재현율이 떨어져 예비). `/mission/camera_active`가 True일 때만 판단 |
+| `hoop_trt_node.py` | `src/vision/start_light` | 훌라후프 YOLO. 팀 6클래스 모델(tl6_1119 계열, 빨강 = 2, 노랑 = 3: `hoop_classes.txt`), TensorRT FP16. `/mission/hoop_active`가 True일 때만 판단 |
 | `yolo_view_node.py` | `src/vision/yolo_test` | 시험용 화면. 주행 노드와 공유하는 것 없음 (`~/yolo_test`) |
 
-NUC에서 `src/vision/start_light/deploy_onboard_vision.sh`가 내부 PC로 파일을 복사한다. TensorRT 엔진은 기기마다 새로 만들어야 해서 내부 PC에서 빌드한다(`trt_build.py`, 로봇을 엎드려 둔 채 약 10분).
+NUC에서 `src/vision/start_light/deploy_onboard_vision.sh push`가 내부 PC `~/junsu_vision`으로 파일을 복사한다. 훌라후프 모델을 바꿀 때는 `day1.sh hoop use <model.pt|onnx> red=<id> yellow=<id>`(ONNX 384×640으로 변환, 클래스 번호 기록) 뒤 `scripts/hoop_update.sh`를 쓴다. TensorRT 엔진은 기기마다 새로 만들어야 해서 내부 PC에서 빌드한다(`trt_build.py`, 로봇을 엎드려 둔 채 약 10분).
 
 ## 4. 토픽
 
@@ -71,7 +71,7 @@ NUC에서 `src/vision/start_light/deploy_onboard_vision.sh`가 내부 PC로 파�
 |---|---|---|
 | `/lidar_points` | PointCloud2 | Hesai 드라이버 → cloud_bridge, 주행기(벽 정합) |
 | `/velodyne_points` | PointCloud2 | cloud_bridge → FAST-LIO |
-| `/scan` | LaserScan | cloud_bridge → 콘 회피 주행기 |
+| `/scan` | LaserScan | cloud_bridge → 콘 회피 주행기 (본 주행기는 안 씀) |
 | `/imu/body` | Imu | imu_bridge → FAST-LIO |
 | `/Odometry` | Odometry | FAST-LIO → odom_tf |
 | `/track/path` | Path | 주행기 → (RViz 확인용) |
@@ -131,10 +131,11 @@ src/
 
 | 상태 | 하는 일 | 다음 |
 |---|---|---|
-| `GAIT` | BalanceStand → ClassicWalk 요청, 응답 코드 0 확인 | LOCK |
+| `GAIT` | BalanceStand → 0.5초 → ClassicWalk 요청. 1.5초 안에 응답이 없으면 다시, 3번 거부되면 STOP | LOCK |
 | `LOCK` | 서 있는 동안 벽 정합 5번이 일치하면 트랙 위치 확정. 경로에서 옆 0.35 m, 방향 15° 넘게 벗어나면 거부 | WAIT |
 | `WAIT` | 신호등 초록 대기. `debug=true`면 `g` 키로 출발 가능 | RUN |
-| `RUN` | 0.2초마다 경로를 6 m 앞까지 RPP에 보냄. 구간에 들어가면 속도·앞보기 거리 변경 | LOOK / LEGS / FINISH |
+| `RUN` | 0.2초마다 경로를 6 m 앞까지 RPP에 보냄. 구간에 들어가면 속도·앞보기 거리 변경 | LOOK / FINISH |
+| `LEGS` | 구간이 `mode: legs`이면 RPP 없이 모서리에서 모서리로 직접 걸음. 지금 경로의 지그재그는 `mode: rpp`라 쓰지 않음 | RUN |
 | `LOOK` | 훌라후프 보는 자리에서 멈추고 177°로 돈 뒤 비전에 물어 갈래를 고름 | REGAIT |
 | `REGAIT` | 서 있는 동안 걸음새가 풀렸을 수 있어 BalanceStand → 0.5초 → ClassicWalk 다시 보냄 | RUN |
 | `FINISH` | 경로 끝 0.12 m 안이나 2.5초 뒤 주행기가 직접 정지 (목표 취소, 정지 명령, StopMove, 모터 브리지 끔) | DONE |
@@ -142,7 +143,7 @@ src/
 
 ### 구간 속도
 
-`routes/<경로>.zones.json`의 상자(트랙 좌표) 안에 들어가면 그 구간 값으로 바꾼다. 상자 가장자리에 0.3 m 여유를 둔다. 속도는 `min(주행 v, 구간 v)`다.
+`routes/<경로>.zones.json`의 상자(트랙 좌표) 안에 들어가면 그 구간 값으로 바꾼다. 상자를 사방으로 0.3 m 넓혀서 보므로, 상자보다 0.3 m 먼저 들어가고 0.3 m 늦게 나온다. 속도는 `min(주행 v, 구간 v)`다. 구간을 나오면 주행 `v`와 `lookahead`로 돌아간다.
 
 | 구간 | 상자 (x0, y0, x1, y1) | 속도 | 앞보기 | 제자리 돌기 |
 |---|---|---|---|---|
@@ -186,7 +187,9 @@ lane,station_m,x_m,y_m,yaw_deg
 | `map.pgm`, `map.yaml` | 2D 점유 지도 |
 | `map_clean.npz` | 경로 편집기·콘 도구가 쓰는 지도 |
 | `map_top.png` | 위에서 본 그림 |
+| `report.txt` | 지도를 만든 녹화와 정렬 결과 |
 | `routes/` | 콘 구간 바꿔 끼우기(`cone_splice`) 결과 |
+| `map_track.npz`, `*.pcd` | 3D 지도. 용량(35 MB 안팎) 때문에 git에 넣지 않았다. `cone_splice`의 3D 지도 교체 단계에만 필요하고, 없으면 `scripts/map_from_bag.sh`로 다시 만든다 |
 
 ### 기록 `logs/day1/` (git에 넣지 않음)
 
@@ -202,7 +205,7 @@ lane,station_m,x_m,y_m,yaw_deg
 
 | 파일 | 주요 값 |
 |---|---|
-| `cyclonedds_go2.xml` | CycloneDDS 인터페이스, 멀티캐스트 설정 |
+| `cyclonedds_go2.xml` | 인터페이스 `robot-br`. 멀티캐스트는 디스커버리(spdp)만 쓴다. 데이터까지 멀티캐스트하면 점구름이 100 Mb/s 포트를 넘쳐 XT16이 7.6 Hz로 떨어진다 |
 | `day1_nav2.yaml` | RPP: 20 Hz, 앞보기 0.8 m(0.6~1.2), 목표 허용 0.10 m. 속도는 주행기가 `v`로 덮어씀 |
 | `fastlio/fastlio_xt16_odometry.yaml` | `max_range` 15 m(먼 관중·구조물 제외), `det_range` 30, `blind` 0.5, 입력 `/velodyne_points`, `/imu/body` |
 
