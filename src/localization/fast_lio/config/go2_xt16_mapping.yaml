@@ -7,7 +7,7 @@
         filter_size_map: 0.08        # 8cm map resolution: creates dense, sharp point cloud (~160k+ points)
         cube_side_length: 1000.0
         runtime_pos_log_enable: false
-        map_file_path: "/home/ilovehan9283/go2_ws/maps/go2_prior_map.pcd"
+        map_file_path: "/home/user/go2_ws/maps/go2_prior_map.pcd"
 
         common:
             lid_topic:  "/velodyne_points"   # Output from go2_bridge cloud_bridge

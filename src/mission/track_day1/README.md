@@ -2,6 +2,8 @@
 
 Day 1 track race: one lap of the assigned lane. No map, no camera: FAST-LIO odometry, the start pose from the 0.6 m arena wall, and the rulebook lane geometry.
 
+This page covers the day-1 track race. The same runner also drives the day-3 mission course (taught route, zones, hula-hoop branch choice): see [docs/STRUCTURE.md](../../../docs/STRUCTURE.md) and [docs/RUN.md](../../../docs/RUN.md).
+
 ```
 XT16 /lidar_points ── standing: wall_align (9.00 x 7.00 m rectangle) ──▶ robot pose in the track frame
                                                                           │ + odom pose at that moment
@@ -97,4 +99,4 @@ python3 tools/plot_plan.py                                      # picture: start
 | through `day1.sh run out` | 44.5 s, no line crossing |
 | no traffic-light messages | waits at the start (moved 0.0 m), warns every 3 s |
 
-Not yet run on the robot.
+These tables are from before the competition. The track race was then run on the robot with `scripts/day1.sh run in|out`.

@@ -759,7 +759,7 @@ void save_to_pcd(bool force = false)
 
     if (map_file_path.empty())
     {
-        map_file_path = "/home/ilovehan9283/go2_ws/maps/go2_prior_map.pcd";
+        map_file_path = "/home/user/go2_ws/maps/go2_prior_map.pcd";
     }
 
     PointCloudXYZI::Ptr map_cloud(new PointCloudXYZI());

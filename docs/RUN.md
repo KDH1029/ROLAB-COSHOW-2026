@@ -149,7 +149,7 @@ scripts/day1.sh hoop build                               # 훌라후프 TensorRT
 
 - `practice_run.sh` 기본값: `route=rec105326_lap1 hoop=in v=0.8 lookahead=0.5 min_radius=0.4 max_lat=0.5 max_head=30 light=none debug=true`. 주행 인자를 모두 받는다.
 - 위치 잡는 방식 `lock=auto|keep|walls` (기본 auto): 같은 FAST-LIO로 15분 안에 `dkeep`이 저장한 위치가 있으면 그것을 쓰고, 없으면 벽과 지도로 잡는다. 지도 안쪽 구조물과 스캔이 얼마나 겹치는지로 쌍둥이를 고르고, 둘 다 안 맞으면 거부한다.
-- `look_test.sh` 인자: `route=` `v=0.8` `look_timeout=600`.
+- `look_test.sh` 인자: `route=` `v=0.8` `look_timeout=600`. 훌라후프 노드를 꺼 두므로 걸으면서는 답이 없고, 기본(`look_mode=move`)에서는 갈래가 갈리는 곳(보는 자리 0.25 m 뒤)에서 서서 돈다. 보는 자리에 정확히 서려면 `look_mode=stop`을 붙인다.
 
 ## 4. 비전 점검 (로봇이 안 움직인다)
 

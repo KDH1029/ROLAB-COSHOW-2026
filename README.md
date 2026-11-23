@@ -37,7 +37,7 @@ Unitree Go2 EDU 사족보행 로봇의 자율주행 스택(ROS 2)입니다. 2026
 ```
 ROLAB-COSHOW-2026/
 ├── config/            CycloneDDS, Nav2(RPP), FAST-LIO 설정
-├── docs/              실행 순서(RUN), 콘 회피(CONES), 경기 설계, 규정집
+├── docs/              실행(RUN), 코드 구조(STRUCTURE), 콘 회피(CONES), 대회 전 설계안(01·02), 규정집
 ├── maps/coshow_1119/  경기장 지도 (2D·3D, 경로 편집용 그림)
 ├── routes/            기록 경로(lap1·lap2)와 구간 파일(.zones.json, .cones.json)
 ├── scripts/           실행 스크립트 (day1.sh, setup_all.sh, day1_align.sh, practice_run.sh …)

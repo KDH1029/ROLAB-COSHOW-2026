@@ -4,10 +4,10 @@
 
 ## 실행
 
-`day1.sh up`(그리고 `xt16`, `light`)까지는 원래 순서와 같다. `run` 대신 아래 명령을 쓴다. 인자는 `day1.sh run`과 같다.
+`day1.sh up`(그리고 `xt16`, `light`)까지는 원래 순서와 같다. `run` 대신 아래 명령을 저장소 루트에서 쓴다(별칭 `dcones`). 인자는 `day1.sh run`과 같다.
 
 ```bash
-~/ws/ROLAB-COSHOW-2026/scripts/day1_cones.sh run route=rec105326_lap1 hoop=red v=0.8
+scripts/day1_cones.sh run route=rec105326_lap1 hoop=red v=0.8
 ```
 
 출발 위치 잡기, 신호등, 지그재그, 훌라후프, 한 바퀴 끝은 원래 주행기와 똑같다. 다른 점은 콘 구간 상자 안에서만 생긴다.
@@ -26,10 +26,10 @@
 ## 콘 구간 정하기
 
 ```bash
-~/ws/ROLAB-COSHOW-2026/scripts/day1_cones.sh zone rec105326_lap1 rec105326_lap2 box=0.0,-3.15,3.75,-0.75
+scripts/day1_cones.sh zone rec105326_lap1 rec105326_lap2 box=0.0,-3.15,3.75,-0.75
 ```
 ```bash
-~/ws/ROLAB-COSHOW-2026/scripts/day1_cones.sh show rec105326_lap1 rec105326_lap2
+scripts/day1_cones.sh show rec105326_lap1 rec105326_lap2
 ```
 
 - 상자는 트랙 좌표 `[x0, y0, x1, y1]`이다. 첫 콘보다 0.5 m쯤 앞에서 시작하고 벽은 빼야 한다. 로봇은 콘 구간 상자 밖으로 비켜 가지 않는다.
@@ -39,7 +39,7 @@
 ## 주행 뒤 확인
 
 ```bash
-~/ws/ROLAB-COSHOW-2026/scripts/day1_cones.sh last
+scripts/day1_cones.sh last
 ```
 
 마지막 주행 기록(`logs/day1/cones_HHMMSS.jsonl`, 0.5초마다)에서 가장 많이 비켜 간 순간을 그림으로 보여 준다. 그림에 나오는 것: 그때 본 장애물 칸, 지도에 없던 칸(자홍색), 보낸 경로, 로봇이 간 길. 특정 시각은 `at=<초>`로 고른다. RViz에서는 `/cone/obstacles`(odom 좌표)를 보면 된다.
