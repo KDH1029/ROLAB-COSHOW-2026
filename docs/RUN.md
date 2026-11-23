@@ -96,12 +96,15 @@ scripts/day1.sh hoop build                               # 훌라후프 TensorRT
 | `light=` | model | `none` = 신호등 안 봄 (`debug=true`일 때만) |
 | `light_timeout=` | 0 | 초. 그동안 초록이 없으면 그냥 출발. 0 = 안 씀 |
 | `look_timeout=` | 10 | 아치 앞에서 비전 답을 기다리는 초. 지나면 무작위 |
+| `look_mode=` | move | `move` = 보는 자리 앞에서 서지 않고 걸으면서 판단. 갈래가 갈리는 곳까지 답이 없으면 거기서 서서 `stop` 방식 / `stop` = 보는 자리에서 서서 돌고 봄 (11-20 방식) |
+| `look_pre=` | 1.5 | 보는 자리 몇 m 전부터 비전을 켤지 (`look_mode=move`) |
 | `debug=` | false | `true` = 연습 모드 (`g`·`1`·`2` 키, `light=none`) |
 | `gait=` | classic | classic / freewalk / trotrun / static / economic |
 | `lookahead=` | 0.5 | RPP 앞보기 (m). 경로 주행 기본값 |
 | `min_radius=` | 0.4 | 최소 회전 반경 (m) |
-| `zigzag_v=` | 0 | 이번 주행만 지그재그 구간 속도. 0 = 구간 파일 값(0.4) |
-| `cones_v=` | 0 | 이번 주행만 라바콘 구간 속도. 0 = 구간 파일 값(0.6) |
+| `zigzag_v=` (줄여서 `zv=`) | 0 | 이번 주행만 지그재그 구간 속도. 0 = 구간 파일 값(0.45) |
+| `cones_v=` (줄여서 `cv=`) | 0 | 이번 주행만 라바콘 구간 속도. 0 = 구간 파일 값(0.6) |
+| `zz` | – | 경로 이름의 `_lap`을 `zz_lap`으로 바꾼 사본으로 주행 (`rec105326_lap1` → `rec105326zz_lap1`). 사본은 `logs/day1/routes/` 작업본에만 있고 git에는 없다 |
 | `max_lat=` | 0.35 | 출발 잠금 허용 옆 오차 (m) |
 | `max_head=` | 15 | 출발 잠금 허용 방향 오차 (°) |
 | `track_dx=` `track_dy=` `track_dyaw_deg=` | 0 | 트랙 좌표 수동 보정 |
@@ -112,8 +115,8 @@ scripts/day1.sh hoop build                               # 훌라후프 TensorRT
 1. **걸음새**: BalanceStand → ClassicWalk. 응답 코드 0을 확인한다.
 2. **출발 위치 잡기**: 서 있는 동안 벽 정합 5번이 맞으면 `start found: …`. 회차 그림이 `logs/day1/plan_HHMMSS.png`로 저장된다. 경로 출발점에서 1 m 넘게 떨어져 있으면 거부한다.
 3. **신호등**: 초록이 0.5초 이어지고 최근 1초 안에 빨강이 없으면 출발한다.
-4. **구간 속도**: 나머지는 `v`, 지그재그는 0.4 m/s(앞보기 0.3 m, 35° 넘는 모서리는 제자리 회전), 라바콘 밭은 0.6 m/s(앞보기 0.5 m).
-5. **훌라후프** (`hoop=red|yellow`): 보는 자리 (2.69, 1.78)에서 멈추고 177°로 돈다. 지정 색 훌라후프가 보인 방향에 있는 갈래로 경로를 바꾼다. 10초 안에 답이 없으면 무작위로 고른다. 다시 걷기 전에 BalanceStand → ClassicWalk를 한 번 더 보낸다.
+4. **구간 속도**: 나머지는 `v`, 지그재그는 0.45 m/s(앞보기 0.3 m, 35° 넘는 모서리는 제자리 회전), 라바콘 밭은 0.6 m/s(앞보기 0.5 m).
+5. **훌라후프** (`hoop=red|yellow`): 보는 자리 (2.69, 1.78) 1.5 m 전부터 걸으면서 비전을 켠다. 프레임마다 그때 자세로 갈래를 판단해 3/3, 4/4, 최근 5개 중 4개가 같으면 바로 그 갈래로 바꾸고 계속 걷는다. 두 갈래가 갈리는 곳(보는 자리 0.25 m 뒤에서 0.3 m 앞)까지 답이 없으면 거기서 멈추고 177°로 돌아 다시 본다. 10초 안에 답이 없으면 무작위로 고른다. 서서 본 경우에만 다시 걷기 전에 BalanceStand → ClassicWalk를 한 번 더 보낸다. `look_mode=stop`이면 처음부터 서서 본다.
 6. **끝**: 경로 끝 0.12 m 안에 들거나 마지막 구간 2.5초 뒤, 주행기가 목표를 취소하고 정지 명령과 StopMove를 보낸 뒤 모터 브리지를 끈다. 로그에 `■ stopped at the lap end`가 뜬다.
 
 ### 대회 모드와 `debug=true`
@@ -132,7 +135,7 @@ scripts/day1.sh hoop build                               # 훌라후프 TensorRT
 |---|---|---|
 | `스페이스` / `x` | 언제나 | 비상 정지 |
 | `g` | 신호등 기다리는 동안 (`debug=true`) | 바로 출발 |
-| `1` / `2` | 훌라후프 보는 자리에서 (`debug=true`) | 안쪽(`rec105326_lap1`) / 바깥쪽(`rec105326_lap2`) |
+| `1` / `2` | 훌라후프를 보는 동안 (`debug=true`) | 안쪽(`rec105326_lap1`) / 바깥쪽(`rec105326_lap2`) |
 | `q` | 언제나 | 정지 후 주행기 종료 |
 
 ## 3. 연습 (로봇이 움직인다)
@@ -234,18 +237,17 @@ scripts/day1.sh hoop build                               # 훌라후프 TensorRT
 | `robot is … from where the route was taught to start` | 출발 표시가 다름 |
 | 터미널이 입력을 안 보여 줌 | `reset` |
 
-## 10. coshow-next 브랜치 (기록 단축 시험)
+## 10. 브랜치와 태그
 
-`coshow-next`는 main을 건드리지 않고 기록 단축을 시험하는 브랜치다. 실기 검증 전이다. 따로 받은 폴더(예: `~/ws/ROLAB-COSHOW-next`)에서 `e`로 시작하는 별칭으로 돌리며, 명령과 인자는 main과 같고 아래만 다르다.
-
-| 항목 | main | coshow-next |
+| | `main` (최종) | `coshow-dev` / 태그 `run-good-1120` (11-20) |
 |---|---|---|
-| 구간 기본 속도 | 콘 0.6, 지그재그 0.4 | 콘 0.65, 지그재그 0.45 |
-| 훌라후프 | 보는 자리에서 서서 돌고 봄 | `look_mode=move`(기본): 보는 자리 `look_pre`(1.5 m) 전부터 걸으면서 보고, 4/5 프레임이 같은 갈래면 바로 바꿈. 갈래가 갈리는 곳까지 답이 없으면 거기서 서서 예전 방식. `look_mode=stop` = main과 같음 |
-| 줄임 인자 | – | `cv=` = `cones_v=`, `zv=` = `zigzag_v=` |
-| 지그재그 고친 경로 | – | `zz`: `<경로>_lapN` 대신 사본 `<경로>zz_lapN`으로 주행 (별칭 `ezred`, `ezin`, `ezhere`, `ezeditin` …). 사본 `rec105326zz_lap*`은 그 폴더의 작업본(`logs/day1/routes/`)에만 있고 git에는 없다 |
+| 구간 기본 속도 | 콘 0.6, 지그재그 0.45 | 콘 0.6, 지그재그 0.4 |
+| 훌라후프 | `look_mode=move`: 걸으면서 보고 바로 바꿈. 갈래가 갈리는 곳까지 답이 없으면 서서 봄 | 보는 자리에서 서서 돌고 봄 |
+| 줄임 인자 | `cv=` `zv=` `zz` | 없음 |
 
-`dsetup`과 `esetup`은 같은 로봇 노드를 띄운다. 한쪽만 켜 두고, 바꿀 때는 먼저 `dkill`을 한다.
+main에서 11-20처럼 돌리려면 `look_mode=stop zv=0.4`를 붙인다. 11-20 코드를 그대로 쓰려면 `git checkout run-good-1120`.
+
+11-21까지는 두 폴더(`~/ws/ROLAB-COSHOW-2026` = coshow-dev, `~/ws/ROLAB-COSHOW-next` = coshow-next)에 받아 `d…` / `e…` 별칭으로 나눠 돌렸다. `e…` 별칭은 아래 `d…` 정의에서 `R`만 next 폴더로 바꾼 것이다. 두 쪽은 같은 로봇 노드를 띄우므로 한쪽만 켜 두고, 바꿀 때는 먼저 `dkill`을 한다.
 
 ## 부록: 별칭 정의
 
